@@ -9,6 +9,8 @@ default:
 variables:
   FORCE_DEPLOY:
     description: "Set this variable to a non-empty value to force image deploy."
+  EXTRA_BUILD_OPTIONS:
+    description: "Additional arguments to be added to each docker build invocation. E.g. add '--no-cache' to disable docker build cache."
 
 .build_template:
   stage: build
@@ -28,7 +30,7 @@ variables:
   script:
     - echo Building autoware universe image $IMAGE_WITH_TAG for ROS_DISTRO=$ROS_DISTRO ...
     - export TIMESTAMP=$(date +%s)
-    - docker build --ssh default -f as_addons/Dockerfile --tag $IMAGE_WITH_TAG --build-arg ROS_DISTRO=$ROS_DISTRO --build-arg BUILD_REF=$BUILD_REF --build-arg TIMESTAMP=$TIMESTAMP .
+    - docker build --ssh default -f as_addons/Dockerfile --tag $IMAGE_WITH_TAG --build-arg ROS_DISTRO=$ROS_DISTRO --build-arg BUILD_REF=$BUILD_REF --build-arg TIMESTAMP=$TIMESTAMP $EXTRA_BUILD_OPTIONS .
 
 .deploy_template:
   stage: deploy

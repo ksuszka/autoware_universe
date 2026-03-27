@@ -8,14 +8,14 @@ ARG INSTALL_DIR=/opt/autoware.universe
 # ================================
 # STAGE: Prepare base image
 # ================================
-FROM ros:${ROS_DISTRO} as base
+FROM ros:${ROS_DISTRO} AS base
 SHELL [ "bash", "-eo", "pipefail", "-c" ]
 
 ARG TZ=UTC
 ARG DEBIAN_FRONTEND=noninteractive
 
-ENV LANG C.UTF-8
-ENV LC_ALL C.UTF-8
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 ENV CCACHE_DIR=/ccache
 ENV CCACHE_UMASK=000
 
@@ -45,7 +45,7 @@ RUN mkdir -p $CCACHE_DIR && chmod 777 $CCACHE_DIR
 # ================================
 # STAGE: Download sources
 # ================================
-FROM base as downloader
+FROM base AS downloader
 
 # Force sources redownload on every changed TIMESTAMP
 ARG TIMESTAMP
@@ -71,7 +71,7 @@ RUN echo "BUILD(downloader): Resolving dependencies..." \
   && apt-get update -y \
   && rosdep update \
   && rosdep install --from-paths src --ignore-packages-from-source -y --reinstall \
-    --skip-keys "awapi_awiv_adapter autoware_iv_internal_api_adaptor autoware_iv_external_api_adaptor eagleye_rt eagleye_gnss_converter eagleye_geo_pose_fusion" \
+    --skip-keys "awapi_awiv_adapter autoware_iv_internal_api_adaptor autoware_iv_external_api_adaptor eagleye_rt eagleye_gnss_converter eagleye_geo_pose_fusion autoware_launch" \
     --simulate | sort -b -k 4 > ${INSTALL_DIR}/ros-deps \
   && rm -rf /var/lib/apt/lists/* \
   && md5sum ${INSTALL_DIR}/ros-deps
@@ -83,7 +83,7 @@ RUN find src -type d -name '.git' -exec rm -rf {} +
 # ================================
 # STAGE: Install depdendencies and build sources
 # ================================
-FROM base as builder
+FROM base AS builder
 
 ARG INSTALL_DIR
 
@@ -118,7 +118,7 @@ RUN sed -i -e "s|%%ROS_DISTRO%%|${ROS_DISTRO}|g" -e "s|%%BUILD_REF%%|${BUILD_REF
 # ================================
 # STAGE: Prepare final image, with single layer
 # ================================
-FROM ros:${ROS_DISTRO} as final
+FROM ros:${ROS_DISTRO} AS final
 
 COPY --from=builder / /
 WORKDIR /work
