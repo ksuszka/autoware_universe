@@ -38,6 +38,7 @@
   <arg name="launch_near_field_module" default="true"/>
   <arg name="launch_goal_shift_module" default="true"/>
   <arg name="launch_comfort_speed_with_offset_module" default="true"/>
+  <arg name="launch_lane_departure_check_module" default="true"/>
 
   <arg name="launch_module_list_end" default="&quot;&quot;]"/>
 
@@ -191,6 +192,11 @@
     name="behavior_velocity_planner_launch_modules"
     value="$(eval &quot;'$(var behavior_velocity_planner_launch_modules)' + 'asystems::behavior_velocity_planner::ComfortSpeedWithOffsetModulePlugin, '&quot;)"
     if="$(var launch_comfort_speed_with_offset_module)"
+  />
+  <let
+    name="behavior_velocity_planner_launch_modules"
+    value="$(eval &quot;'$(var behavior_velocity_planner_launch_modules)' + 'asystems::behavior_velocity_planner::LaneDepartureCheckModulePlugin, '&quot;)"
+    if="$(var launch_lane_departure_check_module)"
   />
   <let name="behavior_velocity_planner_launch_modules" value="$(eval &quot;'$(var behavior_velocity_planner_launch_modules)' + '$(var launch_module_list_end)'&quot;)"/>
 
