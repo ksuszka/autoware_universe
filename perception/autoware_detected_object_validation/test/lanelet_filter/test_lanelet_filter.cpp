@@ -94,6 +94,16 @@ void publishLaneletMapBin(
   LaneletMapBin map_msg = createSimpleLaneletMapMsg();
   test_manager->test_pub_msg<LaneletMapBin>(test_target_node, input_map_topic, map_msg, qos);
 }
+
+void publishLaneletMapBinWithParkingLot(
+  const std::shared_ptr<autoware::test_utils::AutowareTestManager> & test_manager,
+  const std::shared_ptr<rclcpp::Node> & test_target_node,
+  const std::string & input_map_topic = "input/vector_map")
+{
+  auto qos = rclcpp::QoS(1).transient_local();
+  LaneletMapBin map_msg = createLaneletMapMsgWithParkingLot();
+  test_manager->test_pub_msg<LaneletMapBin>(test_target_node, input_map_topic, map_msg, qos);
+}
 }  // namespace
 
 /// @brief Test LaneletMapBin publishing + object filtering
@@ -297,6 +307,72 @@ TEST(DetectedObjectValidationTest, testObjectLaneletFilterHeightThreshold)
   // 7) Check result => now both objects remain because each one's height above base_link is < 2.0
   EXPECT_EQ(latest_msg.objects.size(), 2U)
     << "With ego at z=1.3, the 3.0m object is effectively only ~1.7m above ego => remain.";
+
+  rclcpp::shutdown();
+}
+
+TEST(DetectedObjectValidationTest, testObjectLaneletFilterKeepsObjectInsideParkingLot)
+{
+  rclcpp::init(0, nullptr);
+
+  auto test_manager = generateTestManager();
+  auto test_target_node = generateNode();
+
+  auto tf_node = createStaticTfBroadcasterNode(
+    "map", "base_link", geometry_msgs::build<geometry_msgs::msg::Vector3>().x(0.0).y(0.0).z(0.0),
+    geometry_msgs::build<geometry_msgs::msg::Quaternion>().x(0.0).y(0.0).z(0.0).w(1.0),
+    "my_test_tf_broadcaster_parking");
+
+  const std::string output_topic = "output/object";
+  DetectedObjects latest_msg;
+  auto output_callback = [&latest_msg](const DetectedObjects::ConstSharedPtr msg) {
+    latest_msg = *msg;
+  };
+  test_manager->set_subscriber<DetectedObjects>(output_topic, output_callback);
+
+  publishLaneletMapBinWithParkingLot(test_manager, test_target_node);
+
+  const std::string input_object_topic = "input/object";
+  DetectedObjects input_objects;
+  input_objects.header.frame_id = "base_link";
+
+  {
+    DetectedObject obj;
+    obj.kinematics.pose_with_covariance.pose.position.x = 65.0;
+    obj.kinematics.pose_with_covariance.pose.position.y = 0.0;
+    obj.classification.resize(1);
+    obj.classification[0].label = ObjectClassification::UNKNOWN;
+    obj.shape.footprint.points.push_back(
+      geometry_msgs::build<geometry_msgs::msg::Point32>().x(1.0).y(1.0).z(0.0));
+    obj.shape.footprint.points.push_back(
+      geometry_msgs::build<geometry_msgs::msg::Point32>().x(1.0).y(-1.0).z(0.0));
+    obj.shape.footprint.points.push_back(
+      geometry_msgs::build<geometry_msgs::msg::Point32>().x(-1.0).y(-1.0).z(0.0));
+    obj.shape.footprint.points.push_back(
+      geometry_msgs::build<geometry_msgs::msg::Point32>().x(-1.0).y(1.0).z(0.0));
+    input_objects.objects.push_back(obj);
+  }
+  {
+    DetectedObject obj;
+    obj.kinematics.pose_with_covariance.pose.position.x = 100.0;
+    obj.kinematics.pose_with_covariance.pose.position.y = 5.0;
+    obj.classification.resize(1);
+    obj.classification[0].label = ObjectClassification::UNKNOWN;
+    obj.shape.footprint.points.push_back(
+      geometry_msgs::build<geometry_msgs::msg::Point32>().x(1.0).y(1.0).z(0.0));
+    obj.shape.footprint.points.push_back(
+      geometry_msgs::build<geometry_msgs::msg::Point32>().x(1.0).y(-1.0).z(0.0));
+    obj.shape.footprint.points.push_back(
+      geometry_msgs::build<geometry_msgs::msg::Point32>().x(-1.0).y(-1.0).z(0.0));
+    obj.shape.footprint.points.push_back(
+      geometry_msgs::build<geometry_msgs::msg::Point32>().x(-1.0).y(1.0).z(0.0));
+    input_objects.objects.push_back(obj);
+  }
+
+  test_manager->test_pub_msg<DetectedObjects>(test_target_node, input_object_topic, input_objects);
+
+  EXPECT_EQ(latest_msg.objects.size(), 1U)
+    << "Expected only the object inside parking_lot to remain.";
 
   rclcpp::shutdown();
 }

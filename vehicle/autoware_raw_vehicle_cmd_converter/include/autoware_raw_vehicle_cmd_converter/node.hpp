@@ -29,6 +29,7 @@
 #include <autoware_adapi_v1_msgs/msg/operation_mode_state.hpp>
 #include <autoware_control_msgs/msg/control.hpp>
 #include <autoware_internal_debug_msgs/msg/float32_multi_array_stamped.hpp>
+#include <autoware_vehicle_msgs/msg/gear_command.hpp>
 #include <autoware_vehicle_msgs/msg/steering_report.hpp>
 #include <geometry_msgs/msg/twist_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
@@ -50,6 +51,8 @@ using Odometry = nav_msgs::msg::Odometry;
 using Steering = autoware_vehicle_msgs::msg::SteeringReport;
 using autoware_adapi_v1_msgs::msg::OperationModeState;
 using geometry_msgs::msg::AccelWithCovarianceStamped;
+using Gear = autoware_vehicle_msgs::msg::GearCommand;
+
 class DebugValues
 {
 public:
@@ -87,6 +90,7 @@ public:
   rclcpp::Subscription<Control>::SharedPtr sub_control_cmd_;
   rclcpp::Subscription<ActuationStatusStamped>::SharedPtr sub_actuation_status_;
   rclcpp::Subscription<Steering>::SharedPtr sub_steering_;
+  rclcpp::Subscription<Gear>::SharedPtr sub_gear_cmd_;
   // polling subscribers
   autoware_utils::InterProcessPollingSubscriber<Odometry> sub_odometry_{this, "~/input/odometry"};
   // polling subscribers for vehicle_adaptor
@@ -108,6 +112,29 @@ public:
   AccelMap accel_map_;
   BrakeMap brake_map_;
   SteerMap steer_map_;
+  AccelMap reverse_accel_map_;
+  BrakeMap reverse_brake_map_;
+  enum class GearState : uint8_t { None = 0, DRIVE = 2, REVERSE = 20, PARK = 22 };
+  static GearState toGearState(uint8_t cmd) noexcept
+  {
+    switch (cmd) {
+      case static_cast<uint8_t>(GearState::DRIVE):    return GearState::DRIVE;
+      case static_cast<uint8_t>(GearState::REVERSE):  return GearState::REVERSE;
+      case static_cast<uint8_t>(GearState::PARK):     return GearState::PARK;
+      default:                                        return GearState::None;
+    }
+  }
+  constexpr static std::string_view gearStateName(GearState g) noexcept
+  {
+    switch (g) {
+      case GearState::DRIVE:    return "DRIVE";
+      case GearState::REVERSE:  return "REVERSE";
+      case GearState::PARK:     return "PARK";
+      default:                  return "UNKNOWN";
+    }
+  }
+  GearState current_gear_state_{GearState::None};
+
   VGR vgr_;
   VehicleAdaptor vehicle_adaptor_;
   // TODO(tanaka): consider accel/brake pid too
@@ -121,6 +148,7 @@ public:
   bool use_steer_ff_;
   bool use_steer_fb_;
   bool is_debugging_;
+  bool use_reverse_maps_;                                              //!< @brief use separate accel/brake maps for reverse or not
   bool convert_accel_cmd_;                                             //!< @brief use accel or not
   bool convert_brake_cmd_;                                             //!< @brief use brake or not
   std::optional<std::string> convert_steer_cmd_method_{std::nullopt};  //!< @brief method to convert
@@ -133,6 +161,10 @@ public:
   // the gear ratio. If false, the vehicle interface must publish steering_status.
   bool convert_actuation_to_steering_status_{false};  // !< @brief use actuation_status or not
 
+  bool useReverse() const noexcept
+  {
+    return use_reverse_maps_ && current_gear_state_ == GearState::REVERSE;
+  }
   double calculateAccelMap(
     const double current_velocity, const double desired_acc, bool & accel_cmd_is_zero);
   double calculateBrakeMap(const double current_velocity, const double desired_acc);
@@ -140,6 +172,7 @@ public:
   void onControlCmd(const Control::ConstSharedPtr msg);
   void onSteering(const Steering::ConstSharedPtr msg);
   void onActuationStatus(const ActuationStatusStamped::ConstSharedPtr msg);
+  void onGearCmd(const Gear::ConstSharedPtr msg);
   void publishActuationCmd();
   // for debugging
   rclcpp::Publisher<Float32MultiArrayStamped>::SharedPtr debug_pub_steer_pid_;

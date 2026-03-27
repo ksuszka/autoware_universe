@@ -21,6 +21,7 @@
 #include <lanelet2_core/primitives/Lanelet.h>
 #include <lanelet2_core/primitives/LineString.h>
 #include <lanelet2_core/primitives/Point.h>
+#include <lanelet2_core/primitives/Polygon.h>
 
 #include <memory>
 
@@ -63,6 +64,49 @@ inline autoware_map_msgs::msg::LaneletMapBin createSimpleLaneletMapMsg()
   lanelet::utils::conversion::toBinMsg(lanelet_map, &map_bin_msg);
 
   // 6) Set the frame_id in the header.
+  map_bin_msg.header.frame_id = "map";
+
+  return map_bin_msg;
+}
+
+/**
+ * @brief Create a LaneletMapBin message containing a straight lanelet and a separate parking lot.
+ *
+ * The lanelet occupies x in [0, 50], y in [-1.5, 1.5].
+ * The parking lot occupies x in [60, 70], y in [-3.0, 3.0].
+ *
+ * @return autoware_map_msgs::msg::LaneletMapBin The generated map message.
+ */
+inline autoware_map_msgs::msg::LaneletMapBin createLaneletMapMsgWithParkingLot()
+{
+  lanelet::Point3d p1_left(lanelet::utils::getId(), 0.0, 1.5, 0.0);
+  lanelet::Point3d p2_left(lanelet::utils::getId(), 50.0, 1.5, 0.0);
+  lanelet::LineString3d ls_left(lanelet::utils::getId(), {p1_left, p2_left});
+  ls_left.attributes()[lanelet::AttributeName::Type] = lanelet::AttributeValueString::RoadBorder;
+
+  lanelet::Point3d p1_right(lanelet::utils::getId(), 0.0, -1.5, 0.0);
+  lanelet::Point3d p2_right(lanelet::utils::getId(), 50.0, -1.5, 0.0);
+  lanelet::LineString3d ls_right(lanelet::utils::getId(), {p1_right, p2_right});
+  ls_right.attributes()[lanelet::AttributeName::Type] = lanelet::AttributeValueString::RoadBorder;
+
+  lanelet::Lanelet lanelet_section(lanelet::utils::getId(), ls_left, ls_right);
+  lanelet_section.attributes()[lanelet::AttributeName::Subtype] =
+    lanelet::AttributeValueString::Road;
+
+  lanelet::Polygon3d parking_lot(
+    lanelet::utils::getId(),
+    {lanelet::Point3d(lanelet::utils::getId(), 60.0, -3.0, 0.0),
+     lanelet::Point3d(lanelet::utils::getId(), 70.0, -3.0, 0.0),
+     lanelet::Point3d(lanelet::utils::getId(), 70.0, 3.0, 0.0),
+     lanelet::Point3d(lanelet::utils::getId(), 60.0, 3.0, 0.0)});
+  parking_lot.attributes()[lanelet::AttributeName::Type] = "parking_lot";
+
+  auto lanelet_map = std::make_shared<lanelet::LaneletMap>();
+  lanelet_map->add(lanelet_section);
+  lanelet_map->add(parking_lot);
+
+  autoware_map_msgs::msg::LaneletMapBin map_bin_msg;
+  lanelet::utils::conversion::toBinMsg(lanelet_map, &map_bin_msg);
   map_bin_msg.header.frame_id = "map";
 
   return map_bin_msg;

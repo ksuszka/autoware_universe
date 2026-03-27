@@ -65,6 +65,7 @@ std::optional<ObjectData> getObjectOnPathData(
   obj.velocity = object_speed;
   obj.distance_to_object = std::abs(dist_ego_to_object);
   obj.is_target = (lateral_offset < path_width);
+  obj.source = ObjectData::Source::POINTCLOUD;
   return obj;
 }
 

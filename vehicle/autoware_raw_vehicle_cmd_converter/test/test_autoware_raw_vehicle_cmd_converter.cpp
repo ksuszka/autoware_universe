@@ -15,13 +15,31 @@
 #include "ament_index_cpp/get_package_share_directory.hpp"
 #include "autoware_raw_vehicle_cmd_converter/accel_map.hpp"
 #include "autoware_raw_vehicle_cmd_converter/brake_map.hpp"
+#include "autoware_raw_vehicle_cmd_converter/node.hpp"
 #include "autoware_raw_vehicle_cmd_converter/pid.hpp"
 #include "autoware_raw_vehicle_cmd_converter/steer_map.hpp"
 #include "autoware_raw_vehicle_cmd_converter/vgr.hpp"
 #include "gtest/gtest.h"
 
+#include <rclcpp/rclcpp.hpp>
+
 #include <cmath>
 #include <vector>
+
+// Initialize rclcpp for node-based integration tests.
+// AddGlobalTestEnvironment is safe to call during static init (before main/RUN_ALL_TESTS).
+namespace
+{
+class RclcppEnvironment : public ::testing::Environment
+{
+public:
+  void SetUp() override { rclcpp::init(0, nullptr); }
+  void TearDown() override { rclcpp::shutdown(); }
+};
+
+testing::Environment * const kRclcppEnv =
+  ::testing::AddGlobalTestEnvironment(new RclcppEnvironment());
+}  // namespace
 
 /*
  * Throttle data: (vel, throttle -> acc)
@@ -372,4 +390,267 @@ TEST(VGRTests, zeroCoefficients)
   const double steer = vgr.calculateSteeringTireState(vel, steer_wheel);
   const double steer_wheel2 = steer * gear_ratio;
   EXPECT_NEAR(steer_wheel, steer_wheel2, epsilon);
+}
+
+bool loadReverseAccelMap(AccelMap & m)
+{
+  return m.readAccelMapFromCSV(map_path + "test_reverse_accel_map.csv");
+}
+
+bool loadReverseBrakeMap(BrakeMap & m)
+{
+  return m.readBrakeMapFromCSV(map_path + "test_reverse_brake_map.csv");
+}
+
+// ---- node factory for integration tests --------------------------------------
+
+namespace
+{
+using Node = autoware::raw_vehicle_cmd_converter::RawVehicleCommandConverterNode;
+using GearState = Node::GearState;
+
+// max_throttle / max_brake passed to the node — matches clamp in calculateAccelMap/BrakeMap
+constexpr double kMaxActuationCmd = 1.0;
+
+std::shared_ptr<Node> createConverterNode(bool use_reverse_maps)
+{
+  rclcpp::NodeOptions options;
+  options.append_parameter_override("csv_path_accel_map", map_path + "test_accel_map.csv");
+  options.append_parameter_override("csv_path_brake_map", map_path + "test_brake_map.csv");
+  // always supply reverse map paths; they are declared by the node only when use_reverse_maps=true,
+  // so the overrides are silently ignored when use_reverse_maps=false
+  options.append_parameter_override(
+    "csv_path_reverse_accel_map", map_path + "test_reverse_accel_map.csv");
+  options.append_parameter_override(
+    "csv_path_reverse_brake_map", map_path + "test_reverse_brake_map.csv");
+  options.append_parameter_override("use_reverse_maps", use_reverse_maps);
+  options.append_parameter_override("convert_accel_cmd", true);
+  options.append_parameter_override("convert_brake_cmd", true);
+  options.append_parameter_override("max_throttle", kMaxActuationCmd);
+  options.append_parameter_override("max_brake", kMaxActuationCmd);
+  options.append_parameter_override("max_steer", 1.0);
+  options.append_parameter_override("min_steer", -1.0);
+  options.append_parameter_override("is_debugging", false);
+  options.append_parameter_override("use_steer_ff", false);
+  options.append_parameter_override("use_steer_fb", false);
+  options.append_parameter_override("convert_steer_cmd", false);
+  return std::make_shared<Node>(options);
+}
+}  // namespace
+
+/* GearCommand.msg constants (for reference):
+ *   NONE=0  NEUTRAL=1  DRIVE=2  DRIVE_2..18=3..19
+ *   REVERSE=20  REVERSE_2=21  PARK=22  LOW=23  LOW_2=24
+ */
+TEST(GearStateTests, KnownGearValuesMapCorrectly)
+{
+  EXPECT_EQ(Node::toGearState(0), GearState::None);
+  EXPECT_EQ(Node::toGearState(2), GearState::DRIVE);
+  EXPECT_EQ(Node::toGearState(20), GearState::REVERSE);
+  EXPECT_EQ(Node::toGearState(22), GearState::PARK);
+}
+
+TEST(GearStateTests, UnknownGearValuesFallBackToNone)
+{
+  EXPECT_EQ(Node::toGearState(1), GearState::None);    // NEUTRAL
+  EXPECT_EQ(Node::toGearState(3), GearState::None);    // DRIVE_2
+  EXPECT_EQ(Node::toGearState(19), GearState::None);   // DRIVE_18
+  EXPECT_EQ(Node::toGearState(21), GearState::None);   // REVERSE_2
+  EXPECT_EQ(Node::toGearState(23), GearState::None);   // LOW
+  EXPECT_EQ(Node::toGearState(255), GearState::None);  // out-of-range
+}
+
+TEST(ReverseMapsTests, LoadReverseMapCSV)
+{
+  AccelMap rev_accel;
+  BrakeMap rev_brake;
+  EXPECT_TRUE(loadReverseAccelMap(rev_accel));
+  EXPECT_TRUE(loadReverseBrakeMap(rev_brake));
+}
+
+TEST(ReverseMapsTests, ForwardAndReverseMapsProduceDifferentThrottle)
+{
+  AccelMap fwd, rev;
+  ASSERT_TRUE(loadAccelMapData(fwd));
+  ASSERT_TRUE(loadReverseAccelMap(rev));
+
+  // At (acc=1.0, vel=0.0): forward→0.5, reverse→0.25 (see CSV comments)
+  double fwd_cmd = 0.0, rev_cmd = 0.0;
+  fwd.getThrottle(1.0, 0.0, fwd_cmd);
+  rev.getThrottle(1.0, 0.0, rev_cmd);
+  EXPECT_EQ(rev_cmd, 0.25);
+  EXPECT_EQ(fwd_cmd, 0.5);
+}
+
+TEST(ReverseMapsTests, ForwardAndReverseMapsProduceDifferentBrake)
+{
+  BrakeMap fwd, rev;
+  ASSERT_TRUE(loadBrakeMapData(fwd));
+  ASSERT_TRUE(loadReverseBrakeMap(rev));
+
+  // At (acc=-1.5, vel=0.0): forward→0.5, reverse→0.75 (see CSV comments)
+  double fwd_cmd = 0.0, rev_cmd = 0.0;
+  fwd.getBrake(-1.5, 0.0, fwd_cmd);
+  rev.getBrake(-1.5, 0.0, rev_cmd);
+  EXPECT_EQ(rev_cmd, 0.75);
+  EXPECT_EQ(fwd_cmd, 0.5);
+}
+
+TEST(ReverseMapsTests, DriveGearUsesForwardAccelMap)
+{
+  AccelMap fwd;
+  ASSERT_TRUE(loadAccelMapData(fwd));
+
+  auto node = createConverterNode(/*use_reverse_maps=*/true);
+  node->current_gear_state_ = GearState::DRIVE;
+  bool zero = true;
+  const double result = node->calculateAccelMap(0.0, 1.0, zero);
+
+  double expected = 0.0;
+  fwd.getThrottle(1.0, 0.0, expected);
+  expected = std::min(std::max(expected, 0.0), kMaxActuationCmd);
+  EXPECT_NEAR(result, expected, epsilon);
+}
+
+TEST(ReverseMapsTests, ReverseGearWithReverseMapsUsesReverseAccelMap)
+{
+  AccelMap rev;
+  ASSERT_TRUE(loadReverseAccelMap(rev));
+
+  auto node = createConverterNode(/*use_reverse_maps=*/true);
+  node->current_gear_state_ = GearState::REVERSE;
+  bool zero = true;
+  const double result = node->calculateAccelMap(0.0, 1.0, zero);
+
+  double expected = 0.0;
+  rev.getThrottle(1.0, 0.0, expected);
+  expected = std::min(std::max(expected, 0.0), kMaxActuationCmd);
+  EXPECT_NEAR(result, expected, epsilon);
+}
+
+TEST(ReverseMapsTests, ReverseGearWithoutReverseMapsUsesForwardAccelMap)
+{
+  AccelMap fwd;
+  ASSERT_TRUE(loadAccelMapData(fwd));
+
+  // use_reverse_maps=false → node must use forward map even in REVERSE gear
+  auto node = createConverterNode(/*use_reverse_maps=*/false);
+  node->current_gear_state_ = GearState::REVERSE;
+  bool zero = true;
+  const double result = node->calculateAccelMap(0.0, 1.0, zero);
+
+  double expected = 0.0;
+  fwd.getThrottle(1.0, 0.0, expected);
+  expected = std::min(std::max(expected, 0.0), kMaxActuationCmd);
+  EXPECT_NEAR(result, expected, epsilon);
+}
+
+TEST(ReverseMapsTests, NoneGearUsesForwardAccelMap)
+{
+  AccelMap fwd;
+  ASSERT_TRUE(loadAccelMapData(fwd));
+
+  auto node = createConverterNode(/*use_reverse_maps=*/true);
+  node->current_gear_state_ = GearState::None;
+  bool zero = true;
+  const double result = node->calculateAccelMap(0.0, 1.0, zero);
+
+  double expected = 0.0;
+  fwd.getThrottle(1.0, 0.0, expected);
+  expected = std::min(std::max(expected, 0.0), kMaxActuationCmd);
+  EXPECT_NEAR(result, expected, epsilon);
+}
+
+TEST(ReverseMapsTests, ParkGearUsesForwardAccelMap)
+{
+  AccelMap fwd;
+  ASSERT_TRUE(loadAccelMapData(fwd));
+
+  auto node = createConverterNode(/*use_reverse_maps=*/true);
+  node->current_gear_state_ = GearState::PARK;
+  bool zero = true;
+  const double result = node->calculateAccelMap(0.0, 1.0, zero);
+
+  double expected = 0.0;
+  fwd.getThrottle(1.0, 0.0, expected);
+  expected = std::min(std::max(expected, 0.0), kMaxActuationCmd);
+  EXPECT_NEAR(result, expected, epsilon);
+}
+
+// ---- Gear-based brake-map selection (node integration tests) -----------------
+
+TEST(ReverseMapsTests, DriveGearUsesForwardBrakeMap)
+{
+  BrakeMap fwd;
+  ASSERT_TRUE(loadBrakeMapData(fwd));
+
+  auto node = createConverterNode(/*use_reverse_maps=*/true);
+  node->current_gear_state_ = GearState::DRIVE;
+  const double result = node->calculateBrakeMap(0.0, -1.5);
+
+  double expected = 0.0;
+  fwd.getBrake(-1.5, 0.0, expected);
+  expected = std::min(std::max(expected, 0.0), kMaxActuationCmd);
+  EXPECT_NEAR(result, expected, epsilon);
+}
+
+TEST(ReverseMapsTests, ReverseGearWithReverseMapsUsesReverseBrakeMap)
+{
+  BrakeMap rev;
+  ASSERT_TRUE(loadReverseBrakeMap(rev));
+
+  auto node = createConverterNode(/*use_reverse_maps=*/true);
+  node->current_gear_state_ = GearState::REVERSE;
+  const double result = node->calculateBrakeMap(0.0, -1.5);
+
+  double expected = 0.0;
+  rev.getBrake(-1.5, 0.0, expected);
+  expected = std::min(std::max(expected, 0.0), kMaxActuationCmd);
+  EXPECT_NEAR(result, expected, epsilon);
+}
+
+TEST(ReverseMapsTests, ReverseGearWithoutReverseMapsUsesForwardBrakeMap)
+{
+  BrakeMap fwd;
+  ASSERT_TRUE(loadBrakeMapData(fwd));
+
+  // use_reverse_maps=false → node must use forward map even in REVERSE gear
+  auto node = createConverterNode(/*use_reverse_maps=*/false);
+  node->current_gear_state_ = GearState::REVERSE;
+  const double result = node->calculateBrakeMap(0.0, -1.5);
+
+  double expected = 0.0;
+  fwd.getBrake(-1.5, 0.0, expected);
+  expected = std::min(std::max(expected, 0.0), kMaxActuationCmd);
+  EXPECT_NEAR(result, expected, epsilon);
+}
+
+TEST(ReverseMapsTests, NoneGearUsesForwardBrakeMap)
+{
+  BrakeMap fwd;
+  ASSERT_TRUE(loadBrakeMapData(fwd));
+
+  auto node = createConverterNode(/*use_reverse_maps=*/true);
+  node->current_gear_state_ = GearState::None;
+  const double result = node->calculateBrakeMap(0.0, -1.5);
+
+  double expected = 0.0;
+  fwd.getBrake(-1.5, 0.0, expected);
+  expected = std::min(std::max(expected, 0.0), kMaxActuationCmd);
+  EXPECT_NEAR(result, expected, epsilon);
+}
+
+TEST(ReverseMapsTests, ParkGearUsesForwardBrakeMap)
+{
+  BrakeMap fwd;
+  ASSERT_TRUE(loadBrakeMapData(fwd));
+
+  auto node = createConverterNode(/*use_reverse_maps=*/true);
+  node->current_gear_state_ = GearState::PARK;
+  const double result = node->calculateBrakeMap(0.0, -1.5);
+
+  double expected = 0.0;
+  fwd.getBrake(-1.5, 0.0, expected);
+  expected = std::min(std::max(expected, 0.0), kMaxActuationCmd);
+  EXPECT_NEAR(result, expected, epsilon);
 }

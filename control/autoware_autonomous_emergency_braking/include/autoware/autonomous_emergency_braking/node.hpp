@@ -87,12 +87,26 @@ using MetricArray = tier4_metric_msgs::msg::MetricArray;
  */
 struct ObjectData
 {
+  enum class Source {
+    UNKNOWN,
+    POINTCLOUD,
+    PREDICTED_OBJECTS,
+  };
+
+  enum class PathType {
+    UNKNOWN,
+    IMU,
+    MPC,
+  };
+
   rclcpp::Time stamp;
   geometry_msgs::msg::Point position;
   double velocity{0.0};
   double rss{0.0};
   double distance_to_object{0.0};
   bool is_target{true};
+  Source source{Source::UNKNOWN};
+  PathType path_type{PathType::UNKNOWN};
 };
 
 /**
@@ -587,6 +601,8 @@ public:
   CollisionDataKeeper collision_data_keeper_;
   // Parameter callback
   OnSetParametersCallbackHandle::SharedPtr set_param_res_;
+private:
+  bool emergency_braking_activated_{false};
 };
 }  // namespace autoware::motion::control::autonomous_emergency_braking
 

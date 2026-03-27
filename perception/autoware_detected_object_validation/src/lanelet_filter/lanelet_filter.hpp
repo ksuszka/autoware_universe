@@ -60,6 +60,12 @@ struct PolygonAndLanelet
   lanelet::ConstLanelet lanelet;
 };
 using BoxAndLanelet = std::pair<Box, PolygonAndLanelet>;
+
+struct PolygonOnly
+{
+  lanelet::BasicPolygon2d polygon;
+};
+using BoxAndPolygon = std::pair<Box, PolygonOnly>;
 using RtreeAlgo = bgi::rstar<16>;
 
 class ObjectLaneletFilterNode : public rclcpp::Node
@@ -72,7 +78,8 @@ private:
   void mapCallback(const autoware_map_msgs::msg::LaneletMapBin::ConstSharedPtr);
 
   void publishDebugMarkers(
-    rclcpp::Time stamp, const LinearRing2d & hull, const std::vector<BoxAndLanelet> & lanelets);
+    rclcpp::Time stamp, const LinearRing2d & hull, const std::vector<BoxAndLanelet> & lanelets,
+    const std::vector<BoxAndPolygon> & parking_lots);
 
   rclcpp::Publisher<autoware_perception_msgs::msg::DetectedObjects>::SharedPtr object_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr viz_pub_;
@@ -107,22 +114,27 @@ private:
     const autoware_perception_msgs::msg::DetectedObject & transformed_object,
     const autoware_perception_msgs::msg::DetectedObject & input_object,
     const bg::index::rtree<BoxAndLanelet, RtreeAlgo> & local_rtree,
+    const bg::index::rtree<BoxAndPolygon, RtreeAlgo> & parking_lot_rtree,
     autoware_perception_msgs::msg::DetectedObjects & output_object_msg);
   LinearRing2d getConvexHull(const autoware_perception_msgs::msg::DetectedObjects &);
   LinearRing2d getConvexHullFromObjectFootprint(
     const autoware_perception_msgs::msg::DetectedObject & object);
   std::vector<BoxAndLanelet> getIntersectedLanelets(const LinearRing2d &);
-  bool isObjectOverlapLanelets(
+  std::vector<BoxAndPolygon> getIntersectedParkingLots(const LinearRing2d &);
+  template <typename BoxAndT>
+  bool isObjectOverlap(
     const autoware_perception_msgs::msg::DetectedObject & object,
-    const bg::index::rtree<BoxAndLanelet, RtreeAlgo> & local_rtree);
-  bool isPolygonOverlapLanelets(
-    const Polygon2d & polygon, const bgi::rtree<BoxAndLanelet, RtreeAlgo> & local_rtree);
+    const bgi::rtree<BoxAndT, RtreeAlgo> & local_rtree);
+  template <typename BoxAndT>
+  bool isPolygonOverlap(
+    const Polygon2d & polygon, const bgi::rtree<BoxAndT, RtreeAlgo> & local_rtree);
   bool isSameDirectionWithLanelets(
     const autoware_perception_msgs::msg::DetectedObject & object,
     const bgi::rtree<BoxAndLanelet, RtreeAlgo> & local_rtree);
   geometry_msgs::msg::Polygon setFootprint(const autoware_perception_msgs::msg::DetectedObject &);
 
   lanelet::BasicPolygon2d getPolygon(const lanelet::ConstLanelet & lanelet);
+  lanelet::BasicPolygon2d getPolygon(const lanelet::BasicPolygon2d & polygon);
   std::unique_ptr<autoware_utils::PublishedTimePublisher> published_time_publisher_;
 };
 

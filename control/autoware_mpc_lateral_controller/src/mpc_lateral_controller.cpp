@@ -63,6 +63,7 @@ MpcLateralController::MpcLateralController(
   /* stop state parameters */
   m_stop_state_entry_ego_speed = dp_double("stop_state_entry_ego_speed");
   m_stop_state_entry_target_speed = dp_double("stop_state_entry_target_speed");
+  m_stop_state_velocity_distance_margin = dp_double("stop_state_velocity_distance_margin");
   m_converged_steer_rad = dp_double("converged_steer_rad");
   m_keep_steer_control_until_converged = dp_bool("keep_steer_control_until_converged");
   m_new_traj_duration_time = dp_double("new_traj_duration_time");            // [s]
@@ -467,7 +468,7 @@ bool MpcLateralController::isStoppedState() const
   // It is possible that stop is executed earlier than stop point, and velocity controller
   // will not start when the distance from ego to stop point is less than 0.5 meter.
   // So we use a distance margin to ensure we can detect stopped state.
-  static constexpr double distance_margin = 1.0;
+  double distance_margin = m_stop_state_velocity_distance_margin;
   const double target_vel = std::invoke([&]() -> double {
     auto min_vel = m_current_trajectory.points.at(nearest).longitudinal_velocity_mps;
     auto covered_distance = 0.0;

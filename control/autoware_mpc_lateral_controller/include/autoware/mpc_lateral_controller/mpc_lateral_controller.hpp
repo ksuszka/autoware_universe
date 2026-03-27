@@ -80,6 +80,9 @@ private:
   // Target vehicle speed threshold to enter the stop state.
   double m_stop_state_entry_target_speed;
 
+  // Distance margin to check velocity in the stop state.
+  double m_stop_state_velocity_distance_margin;
+
   // Convergence threshold for steering control.
   double m_converged_steer_rad;
 

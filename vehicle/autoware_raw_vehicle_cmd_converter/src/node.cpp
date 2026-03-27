@@ -30,6 +30,7 @@ RawVehicleCommandConverterNode::RawVehicleCommandConverterNode(
   /* parameters for accel/brake map */
   const auto csv_path_accel_map = declare_parameter<std::string>("csv_path_accel_map");
   const auto csv_path_brake_map = declare_parameter<std::string>("csv_path_brake_map");
+  use_reverse_maps_ = declare_parameter<bool>("use_reverse_maps", false);
   convert_accel_cmd_ = declare_parameter<bool>("convert_accel_cmd");
   convert_brake_cmd_ = declare_parameter<bool>("convert_brake_cmd");
   max_accel_cmd_ = declare_parameter<double>("max_throttle");
@@ -46,10 +47,24 @@ RawVehicleCommandConverterNode::RawVehicleCommandConverterNode(
     if (!accel_map_.readAccelMapFromCSV(csv_path_accel_map, true)) {
       throw std::invalid_argument("Accel map is invalid.");
     }
+    if (use_reverse_maps_) {
+      const auto csv_path_reverse_accel_map =
+        declare_parameter<std::string>("csv_path_reverse_accel_map");
+      if (!reverse_accel_map_.readAccelMapFromCSV(csv_path_reverse_accel_map, true)) {
+        throw std::invalid_argument("Reverse Accel map is invalid.");
+      }
+    }
   }
   if (convert_brake_cmd_) {
     if (!brake_map_.readBrakeMapFromCSV(csv_path_brake_map, true)) {
       throw std::invalid_argument("Brake map is invalid.");
+    }
+    if (use_reverse_maps_) {
+      const auto csv_path_reverse_brake_map =
+        declare_parameter<std::string>("csv_path_reverse_brake_map");
+      if (!reverse_brake_map_.readBrakeMapFromCSV(csv_path_reverse_brake_map, true)) {
+        throw std::invalid_argument("Reverse Brake map is invalid.");
+      }
     }
   }
   if (declare_parameter<bool>("convert_steer_cmd")) {
@@ -113,6 +128,9 @@ RawVehicleCommandConverterNode::RawVehicleCommandConverterNode(
 
   sub_control_cmd_ = create_subscription<Control>(
     "~/input/control_cmd", 1, std::bind(&RawVehicleCommandConverterNode::onControlCmd, this, _1));
+
+  sub_gear_cmd_ = create_subscription<Gear>(
+    "~/input/gear_cmd", 1, std::bind(&RawVehicleCommandConverterNode::onGearCmd, this, _1));
 
   pub_actuation_cmd_ = create_publisher<ActuationCommandStamped>("~/output/actuation_cmd", 1);
   debug_pub_steer_pid_ = create_publisher<Float32MultiArrayStamped>(
@@ -260,7 +278,8 @@ double RawVehicleCommandConverterNode::calculateAccelMap(
   const double current_velocity, const double desired_acc, bool & accel_cmd_is_zero)
 {
   double desired_accel_cmd = 0;
-  if (!accel_map_.getThrottle(desired_acc, std::abs(current_velocity), desired_accel_cmd)) {
+  const auto & map = useReverse() ? reverse_accel_map_ : accel_map_;
+  if (!map.getThrottle(desired_acc, std::abs(current_velocity), desired_accel_cmd)) {
     desired_accel_cmd = 0;
   } else {
     accel_cmd_is_zero = false;
@@ -273,7 +292,8 @@ double RawVehicleCommandConverterNode::calculateBrakeMap(
   const double current_velocity, const double desired_acc)
 {
   double desired_brake_cmd = 0;
-  brake_map_.getBrake(desired_acc, std::abs(current_velocity), desired_brake_cmd);
+  auto & map = useReverse() ? reverse_brake_map_ : brake_map_;
+  map.getBrake(desired_acc, std::abs(current_velocity), desired_brake_cmd);
   desired_brake_cmd = std::min(std::max(desired_brake_cmd, 0.0), max_brake_cmd_);
   return desired_brake_cmd;
 }
@@ -283,6 +303,17 @@ void RawVehicleCommandConverterNode::onControlCmd(const Control::ConstSharedPtr 
   current_odometry_ = sub_odometry_.take_data();
   control_cmd_ptr_ = msg;
   publishActuationCmd();
+}
+
+void RawVehicleCommandConverterNode::onGearCmd(const Gear::ConstSharedPtr msg)
+{
+  const auto new_gear_state = toGearState(msg->command);
+  if (new_gear_state != current_gear_state_) {
+    RCLCPP_DEBUG(
+      get_logger(), "Gear state changed: %s -> %s", gearStateName(current_gear_state_).data(),
+      gearStateName(new_gear_state).data());
+    current_gear_state_ = new_gear_state;
+  }
 }
 
 void RawVehicleCommandConverterNode::onSteering(const Steering::ConstSharedPtr msg)

@@ -50,6 +50,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 #ifdef ROS_DISTRO_GALACTIC
 #include <tf2_eigen/tf2_eigen.h>
@@ -63,11 +64,38 @@
 namespace
 {
 using autoware::motion::control::autonomous_emergency_braking::colorTuple;
+using autoware::motion::control::autonomous_emergency_braking::ObjectData;
 constexpr double MIN_MOVING_VELOCITY_THRESHOLD = 0.1;
 // Sky blue (RGB: 0, 148, 205) - A medium-bright blue color
 constexpr colorTuple IMU_PATH_COLOR = {0.0 / 256.0, 148.0 / 256.0, 205.0 / 256.0, 0.999};
 // Forest green (RGB: 0, 100, 0) - A deep, dark green color
 constexpr colorTuple MPC_PATH_COLOR = {0.0 / 256.0, 100.0 / 256.0, 0.0 / 256.0, 0.999};
+
+constexpr std::string_view toString(const ObjectData::Source source)
+{
+  switch (source) {
+    case ObjectData::Source::POINTCLOUD:
+      return "pointcloud";
+    case ObjectData::Source::PREDICTED_OBJECTS:
+      return "predicted_objects";
+    case ObjectData::Source::UNKNOWN:
+    default:
+      return "unknown";
+  }
+}
+
+constexpr std::string_view toString(const ObjectData::PathType path_type)
+{
+  switch (path_type) {
+    case ObjectData::PathType::IMU:
+      return "imu";
+    case ObjectData::PathType::MPC:
+      return "mpc";
+    case ObjectData::PathType::UNKNOWN:
+    default:
+      return "unknown";
+  }
+}
 }  // namespace
 
 namespace autoware::motion::control::autonomous_emergency_braking
@@ -419,8 +447,18 @@ void AEB::onCheckCollision(DiagnosticStatusWrapper & stat)
     const std::string error_msg = "[AEB]: Emergency Brake";
     const auto diag_level = DiagnosticStatus::ERROR;
     stat.summary(diag_level, error_msg);
+    emergency_braking_activated_ = true;
     const auto & data = collision_data_keeper_.get();
     if (data.has_value()) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 1000,
+        "[AEB] Emergency braking active: source=%s, path_type=%s, distance=%.3f m, rss=%.3f m, "
+        "obj_v=%.3f m/s, relative_obj_pos=(x=%.3f, y=%.3f, z=%.3f)",
+        toString(data.value().source).data(), toString(data.value().path_type).data(),
+        data.value().distance_to_object, data.value().rss, data.value().velocity,
+        data.value().position.x, data.value().position.y, data.value().position.z);
+      stat.addf("Source", "%s", toString(data.value().source).data());
+      stat.addf("Path Type", "%s", toString(data.value().path_type).data());
       stat.addf("RSS", "%.2f", data.value().rss);
       stat.addf("Distance", "%.2f", data.value().distance_to_object);
       stat.addf("Object Speed", "%.2f", data.value().velocity);
@@ -438,9 +476,13 @@ void AEB::onCheckCollision(DiagnosticStatusWrapper & stat)
     }
 
   } else {
+    if (emergency_braking_activated_) {
+      RCLCPP_INFO(get_logger(), "[AEB] Emergency braking status cleared");
+    }
     const std::string error_msg = "[AEB]: No Collision";
     const auto diag_level = DiagnosticStatus::OK;
     stat.summary(diag_level, error_msg);
+    emergency_braking_activated_ = false;
   }
 
   // publish debug markers
@@ -482,7 +524,8 @@ bool AEB::checkCollision(MarkerArray & debug_markers)
 
   auto get_objects_on_path = [&](
                                const auto & path, PointCloud::Ptr points_belonging_to_cluster_hulls,
-                               const colorTuple & debug_colors, const std::string & debug_ns) {
+                               const colorTuple & debug_colors,
+                               const ObjectData::PathType & path_type) {
     // Check which points of the cropped point cloud are on the ego path, and get the closest one
     const auto ego_polys = generatePathFootprint(path, expand_width_);
     std::vector<ObjectData> objects;
@@ -497,12 +540,27 @@ bool AEB::checkCollision(MarkerArray & debug_markers)
       createObjectDataUsingPredictedObjects(path, ego_polys, objects);
     }
 
-    // Add debug markers
-    if (publish_debug_markers_) {
-      addMarker(
-        this->get_clock()->now(), path, ego_polys, objects, collision_data_keeper_.get(),
-        debug_colors, debug_ns, debug_markers);
-    }
+    auto update_object_path_type = [&](
+                                     std::vector<ObjectData> & objects,
+                                     const ObjectData::PathType & path_type) {
+      // Update the path type for all objects in the list
+      for (auto & object : objects) {
+        object.path_type = path_type;
+      }
+    };
+
+    auto publish_debug_markers = [&]() {
+      // Add debug markers
+      if (publish_debug_markers_) {
+        addMarker(
+          this->get_clock()->now(), path, ego_polys, objects, collision_data_keeper_.get(),
+          debug_colors, std::string(toString(path_type)), debug_markers);
+      }
+    };
+
+    update_object_path_type(objects, path_type);
+    publish_debug_markers();
+
     return objects;
   };
 
@@ -578,13 +636,18 @@ bool AEB::checkCollision(MarkerArray & debug_markers)
   const auto imu_path_objects =
     (!use_imu_path_ || !angular_velocity_ptr_)
       ? std::vector<ObjectData>{}
-      : get_objects_on_path(ego_imu_path, points_belonging_to_cluster_hulls, IMU_PATH_COLOR, "imu");
+      : get_objects_on_path(
+          ego_imu_path, points_belonging_to_cluster_hulls,
+          IMU_PATH_COLOR,
+          ObjectData::PathType::IMU);
 
   const auto mpc_path_objects =
     (!use_predicted_trajectory_ || !predicted_traj_ptr_ || !ego_mpc_path.has_value())
       ? std::vector<ObjectData>{}
       : get_objects_on_path(
-          ego_mpc_path.value(), points_belonging_to_cluster_hulls, MPC_PATH_COLOR, "mpc");
+          ego_mpc_path.value(), points_belonging_to_cluster_hulls,
+          MPC_PATH_COLOR,
+          ObjectData::PathType::MPC);
 
   // merge object data which comes from the ego (imu) path and predicted path
   auto merge_objects =
@@ -858,6 +921,7 @@ void AEB::createObjectDataUsingPredictedObjects(
         obj.velocity = obj_tangent_velocity;
         obj.distance_to_object = std::abs(dist_ego_to_object);
         obj.is_target = true;
+        obj.source = ObjectData::Source::PREDICTED_OBJECTS;
         object_data_vector.push_back(obj);
         collision_points_added = true;
       }

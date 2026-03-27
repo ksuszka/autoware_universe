@@ -16,6 +16,11 @@
           "description": "threshold value of the target speed used to the stop state entry condition",
           "default": 0.001
         },
+        "stop_state_velocity_distance_margin": {
+          "type": "number",
+          "description": "distance margin to check velocity in the stop state",
+          "default": 1.0
+        },
         "converged_steer_rad": {
           "type": "number",
           "description": "threshold value of the steer convergence",
@@ -45,6 +50,7 @@
       "required": [
         "stop_state_entry_ego_speed",
         "stop_state_entry_target_speed",
+        "stop_state_velocity_distance_margin",
         "converged_steer_rad",
         "keep_steer_control_until_converged",
         "new_traj_duration_time",

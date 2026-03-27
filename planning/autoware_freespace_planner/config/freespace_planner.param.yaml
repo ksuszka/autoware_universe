@@ -20,14 +20,6 @@
     time_limit: 30000.0
     max_turning_ratio: 0.5 # ratio of actual turning limit of vehicle
     turning_steps: 3
-    final_segment_threshold: 5.0
-    extra_steering_penalty_factor: 1.0
-    yaw_weight: 15.0
-    distance_to_goal_extension_weight: 1.0
-    reparking_forward_first_weight: 100.0
-    reparking_deviation_penalty: 10.0
-    reparking_alignment_weight: 2.0
-    reparking_distance: 2.0
 
     # search configs
     theta_size: 120

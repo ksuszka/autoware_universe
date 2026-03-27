@@ -93,7 +93,8 @@ std::optional<visualization_msgs::msg::Marker> createPolygonMarker(
 }
 
 void ObjectLaneletFilterNode::publishDebugMarkers(
-  rclcpp::Time stamp, const LinearRing2d & hull, const std::vector<BoxAndLanelet> & lanelets)
+  rclcpp::Time stamp, const LinearRing2d & hull, const std::vector<BoxAndLanelet> & lanelets,
+  const std::vector<BoxAndPolygon> & parking_lots)
 {
   using visualization_msgs::msg::Marker;
   using visualization_msgs::msg::MarkerArray;
@@ -102,6 +103,7 @@ void ObjectLaneletFilterNode::publishDebugMarkers(
   Marker delete_marker;
   constexpr std::string_view lanelet_range = "lanelet_range";
   constexpr std::string_view roi = "roi";
+  constexpr std::string_view parking_roi = "parking_roi";
 
   MarkerArray marker_array;
 
@@ -119,6 +121,15 @@ void ObjectLaneletFilterNode::publishDebugMarkers(
     color.b = 1.0;
     auto p = box_and_lanelet.second.polygon;
     if (auto marker = createPolygonMarker(p, stamp, roi, ++marker_id, color); marker) {
+      marker_array.markers.push_back(std::move(*marker));
+    }
+  }
+  for (const auto & box_and_polygon : parking_lots) {
+    color.r = 0.7;
+    color.g = 0.2;
+    color.b = 1.0;
+    const auto & p = box_and_polygon.second.polygon;
+    if (auto marker = createPolygonMarker(p, stamp, parking_roi, ++marker_id, color); marker) {
       marker_array.markers.push_back(std::move(*marker));
     }
   }

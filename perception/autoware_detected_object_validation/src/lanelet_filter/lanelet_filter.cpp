@@ -170,21 +170,30 @@ void ObjectLaneletFilterNode::objectCallback(
 
     // get intersected lanelets
     std::vector<BoxAndLanelet> intersected_lanelets_with_bbox = getIntersectedLanelets(convex_hull);
+    std::vector<BoxAndPolygon> intersected_parking_lots_with_bbox =
+      getIntersectedParkingLots(convex_hull);
 
     // create R-Tree with intersected_lanelets for fast search
     bgi::rtree<BoxAndLanelet, RtreeAlgo> local_rtree;
     for (const auto & bbox_and_lanelet : intersected_lanelets_with_bbox) {
       local_rtree.insert(bbox_and_lanelet);
     }
+    bgi::rtree<BoxAndPolygon, RtreeAlgo> parking_lot_rtree;
+    for (const auto & bbox_and_polygon : intersected_parking_lots_with_bbox) {
+      parking_lot_rtree.insert(bbox_and_polygon);
+    }
 
     if (filter_settings_.debug) {
-      publishDebugMarkers(input_msg->header.stamp, convex_hull, intersected_lanelets_with_bbox);
+      publishDebugMarkers(
+        input_msg->header.stamp, convex_hull, intersected_lanelets_with_bbox,
+        intersected_parking_lots_with_bbox);
     }
     // filtering process
     for (size_t index = 0; index < transformed_objects.objects.size(); ++index) {
       const auto & transformed_object = transformed_objects.objects.at(index);
       const auto & input_object = input_msg->objects.at(index);
-      filterObject(transformed_object, input_object, local_rtree, output_object_msg);
+      filterObject(
+        transformed_object, input_object, local_rtree, parking_lot_rtree, output_object_msg);
     }
   }
 
@@ -207,12 +216,13 @@ bool ObjectLaneletFilterNode::filterObject(
   const autoware_perception_msgs::msg::DetectedObject & transformed_object,
   const autoware_perception_msgs::msg::DetectedObject & input_object,
   const bgi::rtree<BoxAndLanelet, RtreeAlgo> & local_rtree,
+  const bgi::rtree<BoxAndPolygon, RtreeAlgo> & parking_lot_rtree,
   autoware_perception_msgs::msg::DetectedObjects & output_object_msg)
 {
   const auto & label = transformed_object.classification.front().label;
   if (filter_target_.isTarget(label)) {
     // no tree, then no intersection
-    if (local_rtree.empty()) {
+    if (local_rtree.empty() && parking_lot_rtree.empty()) {
       return false;
     }
 
@@ -227,17 +237,21 @@ bool ObjectLaneletFilterNode::filterObject(
     }
 
     bool filter_pass = true;
+    bool is_parking_lot_overlap = false;
     // 1. is polygon overlap with road lanelets or shoulder lanelets
     if (filter_settings_.polygon_overlap_filter) {
-      const bool is_polygon_overlap = isObjectOverlapLanelets(transformed_object, local_rtree);
-      filter_pass = filter_pass && is_polygon_overlap;
+      const bool is_lanelet_overlap = isObjectOverlap(transformed_object, local_rtree);
+      is_parking_lot_overlap = isObjectOverlap(transformed_object, parking_lot_rtree);
+      filter_pass = filter_pass && (is_lanelet_overlap || is_parking_lot_overlap);
     }
 
     // 2. check if objects velocity is the same with the lanelet direction
     const bool orientation_not_available =
       transformed_object.kinematics.orientation_availability ==
       autoware_perception_msgs::msg::TrackedObjectKinematics::UNAVAILABLE;
-    if (filter_settings_.lanelet_direction_filter && !orientation_not_available) {
+    if (
+      filter_settings_.lanelet_direction_filter && !orientation_not_available &&
+      !is_parking_lot_overlap) {
       const bool is_same_direction = isSameDirectionWithLanelets(transformed_object, local_rtree);
       filter_pass = filter_pass && is_same_direction;
     }
@@ -357,15 +371,56 @@ std::vector<BoxAndLanelet> ObjectLaneletFilterNode::getIntersectedLanelets(
   return intersected_lanelets_with_bbox;
 }
 
-lanelet::BasicPolygon2d ObjectLaneletFilterNode::getPolygon(const lanelet::ConstLanelet & lanelet)
+std::vector<BoxAndPolygon> ObjectLaneletFilterNode::getIntersectedParkingLots(
+  const LinearRing2d & convex_hull)
 {
-  if (filter_settings_.lanelet_extra_margin <= 0) {
-    return lanelet.polygon2d().basicPolygon();
+  std::vector<BoxAndPolygon> intersected_parking_lots_with_bbox;
+
+  bg::model::box<bg::model::d2::point_xy<double>> bbox_of_convex_hull;
+  bg::envelope(convex_hull, bbox_of_convex_hull);
+  const lanelet::BoundingBox2d bbox2d(
+    lanelet::BasicPoint2d(
+      bg::get<bg::min_corner, 0>(bbox_of_convex_hull),
+      bg::get<bg::min_corner, 1>(bbox_of_convex_hull)),
+    lanelet::BasicPoint2d(
+      bg::get<bg::max_corner, 0>(bbox_of_convex_hull),
+      bg::get<bg::max_corner, 1>(bbox_of_convex_hull)));
+
+  const auto candidate_polygons = lanelet_map_ptr_->polygonLayer.search(bbox2d);
+  for (const auto & polygon3d : candidate_polygons) {
+    const std::string type = polygon3d.attributeOr(lanelet::AttributeName::Type, "none");
+    if (type != "parking_lot") {
+      continue;
+    }
+
+    const auto polygon2d = lanelet::utils::to2D(polygon3d).basicPolygon();
+    if (bg::intersects(convex_hull, polygon2d)) {
+      auto polygon = getPolygon(polygon2d);
+      Box boost_bbox;
+      bg::envelope(polygon, boost_bbox);
+
+      intersected_parking_lots_with_bbox.emplace_back(
+        std::make_pair(boost_bbox, PolygonOnly{polygon}));
+    }
   }
 
-  auto lanelet_polygon = lanelet.polygon2d().basicPolygon();
+  return intersected_parking_lots_with_bbox;
+}
+
+lanelet::BasicPolygon2d ObjectLaneletFilterNode::getPolygon(const lanelet::ConstLanelet & lanelet)
+{
+  return getPolygon(lanelet.polygon2d().basicPolygon());
+}
+
+lanelet::BasicPolygon2d ObjectLaneletFilterNode::getPolygon(
+  const lanelet::BasicPolygon2d & polygon_2d)
+{
+  if (filter_settings_.lanelet_extra_margin <= 0) {
+    return polygon_2d;
+  }
+
   Polygon2d polygon;
-  bg::assign_points(polygon, lanelet_polygon);
+  bg::assign_points(polygon, polygon_2d);
 
   bg::correct(polygon);
   auto polygon_result = expandPolygon(polygon.outer(), filter_settings_.lanelet_extra_margin);
@@ -376,9 +431,10 @@ lanelet::BasicPolygon2d ObjectLaneletFilterNode::getPolygon(const lanelet::Const
   return result;
 }
 
-bool ObjectLaneletFilterNode::isObjectOverlapLanelets(
+template <typename BoxAndT>
+bool ObjectLaneletFilterNode::isObjectOverlap(
   const autoware_perception_msgs::msg::DetectedObject & object,
-  const bgi::rtree<BoxAndLanelet, RtreeAlgo> & local_rtree)
+  const bgi::rtree<BoxAndT, RtreeAlgo> & local_rtree)
 {
   // if object has bounding box, use polygon overlap
   if (utils::hasBoundingBox(object)) {
@@ -391,12 +447,12 @@ bool ObjectLaneletFilterNode::isObjectOverlapLanelets(
     }
     polygon.outer().push_back(polygon.outer().front());
 
-    return isPolygonOverlapLanelets(polygon, local_rtree);
+    return isPolygonOverlap(polygon, local_rtree);
   } else {
     const LinearRing2d object_convex_hull = getConvexHullFromObjectFootprint(object);
 
     // create bounding box to search in the rtree
-    std::vector<BoxAndLanelet> candidates;
+    std::vector<BoxAndT> candidates;
     bg::model::box<bg::model::d2::point_xy<double>> bbox;
     bg::envelope(object_convex_hull, bbox);
     local_rtree.query(bgi::intersects(bbox), std::back_inserter(candidates));
@@ -420,11 +476,12 @@ bool ObjectLaneletFilterNode::isObjectOverlapLanelets(
   }
 }
 
-bool ObjectLaneletFilterNode::isPolygonOverlapLanelets(
-  const Polygon2d & polygon, const bgi::rtree<BoxAndLanelet, RtreeAlgo> & local_rtree)
+template <typename BoxAndT>
+bool ObjectLaneletFilterNode::isPolygonOverlap(
+  const Polygon2d & polygon, const bgi::rtree<BoxAndT, RtreeAlgo> & local_rtree)
 {
   // create a bounding box from polygon for searching the local R-tree
-  std::vector<BoxAndLanelet> candidates;
+  std::vector<BoxAndT> candidates;
   bg::model::box<bg::model::d2::point_xy<double>> bbox_of_convex_hull;
   bg::envelope(polygon, bbox_of_convex_hull);
   local_rtree.query(bgi::intersects(bbox_of_convex_hull), std::back_inserter(candidates));
