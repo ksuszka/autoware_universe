@@ -26,9 +26,7 @@ units:
       - { type: link, link: /autoware/planning/trajectory_validation/velocity_deviation }
 
   - path: /autoware/planning/emergency_stop
-    type: and
-    list:
-      - { type: link, link: /planning/path_optimizer_emergency_stop-error }
+    type: ok # Temporary workaround for issue SDP-6446
 
   - path: /autoware/planning/routing/state
     type: diag

@@ -75,3 +75,9 @@
       steering_offset_limit: 0.02
 
     publish_debug_trajectories: true # flag to publish predicted trajectory and resampled reference trajectory for debug purpose
+
+    steering_corrector:
+      enabled: true # flag to enable steering corrector
+      correction_limit: 0.1 # rad, maximum absolute value of steering correction
+      min_distance: 2.0 # m, minimum distance to apply steering correction
+      max_heading_diff: 0.5 # rad, maximum heading difference to apply correction

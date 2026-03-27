@@ -791,12 +791,12 @@ void VehicleCmdGate::onMrmState(MrmState::ConstSharedPtr msg)
 
 double VehicleCmdGate::getDt()
 {
-  if (!prev_time_) {
-    prev_time_ = std::make_shared<rclcpp::Time>(this->now());
+  const auto current_time = this->now();
+  if (!prev_time_ || current_time < *prev_time_) {
+    prev_time_ = std::make_shared<rclcpp::Time>(current_time);
     return 0.0;
   }
 
-  const auto current_time = this->now();
   const auto dt = (current_time - *prev_time_).seconds();
   *prev_time_ = current_time;
 

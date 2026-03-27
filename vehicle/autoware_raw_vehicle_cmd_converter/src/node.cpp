@@ -218,7 +218,7 @@ double RawVehicleCommandConverterNode::calculateSteerFromMap(
   std::vector<double> pid_errors(3, 0.0);
   rclcpp::Time current_time = this->now();
   double dt = (current_time - prev_time_steer_calculation_).seconds();
-  if (std::abs(dt) > 1.0) {
+  if (std::abs(dt) > 1.0 || current_time <= prev_time_steer_calculation_) {
     RCLCPP_WARN_EXPRESSION(get_logger(), is_debugging_, "ignore old topic");
     dt = 0.1;  // set ordinary delta time instead
   }

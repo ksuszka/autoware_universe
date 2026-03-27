@@ -132,7 +132,8 @@ Control MrmEmergencyStopOperator::calcTargetAcceleration(const Control & prev_co
   }
 
   control_cmd = prev_control_cmd;
-  const auto dt = (this->now() - prev_control_cmd.stamp).seconds();
+  const auto dt =
+    this->now() > prev_control_cmd.stamp ? (this->now() - prev_control_cmd.stamp).seconds() : 0.0;
 
   control_cmd.stamp = this->now();
   control_cmd.longitudinal.stamp = this->now();

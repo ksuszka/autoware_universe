@@ -156,6 +156,18 @@ MpcLateralController::MpcLateralController(
   m_mpc->setClock(clock_);
 
   setupDiag();
+
+  {
+    // Steering corrector parameters
+    SteeringCorrectorParams params;
+
+    const auto enabled = dp_bool("steering_corrector.enabled");
+    params.steer_limit = vehicle_info.max_steer_angle_rad;
+    params.correction_limit = dp_double("steering_corrector.correction_limit");
+    params.min_distance = dp_double("steering_corrector.min_distance");
+    params.max_heading_diff = dp_double("steering_corrector.max_heading_diff");
+    m_mpc->initializeSteeringCorrector(enabled, vehicle_model_ptr, params);
+  }
 }
 
 MpcLateralController::~MpcLateralController()

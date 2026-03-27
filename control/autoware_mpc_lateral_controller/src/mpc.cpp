@@ -17,6 +17,7 @@
 #include "autoware/interpolation/linear_interpolation.hpp"
 #include "autoware/motion_utils/trajectory/trajectory.hpp"
 #include "autoware/mpc_lateral_controller/mpc_utils.hpp"
+#include "autoware/mpc_lateral_controller/steering_corrector.hpp"
 #include "autoware_utils/math/unit_conversion.hpp"
 #include "rclcpp/rclcpp.hpp"
 
@@ -86,12 +87,24 @@ ResultWithReason MPC::calculateMPC(
   const auto mpc_matrix = generateMPCMatrix(mpc_resampled_ref_trajectory, prediction_dt);
 
   // solve Optimization problem
-  const auto [opt_result, Uex] = executeOptimization(
+  const auto [opt_result, opt_uex] = executeOptimization(
     mpc_matrix, x0_delayed, prediction_dt, mpc_resampled_ref_trajectory,
     current_kinematics.twist.twist.linear.x);
   if (!opt_result.result) {
     return ResultWithReason{false, fmt::format("optimization failure ({}).", opt_result.reason)};
   }
+
+  // apply steering correction to better fit in world coordinates
+  auto Uex = [&, opt_uex = opt_uex, mpc_resampled_ref_trajectory = mpc_resampled_ref_trajectory,
+              x0_delayed = x0_delayed]() {
+    if (m_steering_corrector_ptr == nullptr) {
+      return opt_uex;
+    }
+
+    auto initial_state = m_use_delayed_initial_state ? x0_delayed : x0;
+    return m_steering_corrector_ptr->calculate(
+      mpc_resampled_ref_trajectory, mpc_matrix, initial_state, opt_uex, prediction_dt);
+  }();
 
   // apply filters for the input limitation and low pass filter
   const double u_saturated = std::clamp(Uex(0), -m_steer_lim, m_steer_lim);
@@ -120,9 +133,10 @@ ResultWithReason MPC::calculateMPC(
 
   // Publish predicted trajectories in different coordinates for debugging purposes
   if (m_publish_debug_trajectories) {
-    // Calculate and publish predicted trajectory in Frenet coordinate
+    // Calculate and publish predicted trajectory in Frenet coordinate (use optimization before
+    // steering correction)
     auto predicted_trajectory_frenet = calculatePredictedTrajectory(
-      mpc_matrix, initial_state, Uex, mpc_resampled_ref_trajectory, prediction_dt, "frenet");
+      mpc_matrix, initial_state, opt_uex, mpc_resampled_ref_trajectory, prediction_dt, "frenet");
     predicted_trajectory_frenet.header.stamp = m_clock->now();
     predicted_trajectory_frenet.header.frame_id = "map";
     m_debug_frenet_predicted_trajectory_pub->publish(predicted_trajectory_frenet);
@@ -851,4 +865,13 @@ bool MPC::isValid(const MPCMatrix & m) const
 
   return true;
 }
+
+void MPC::initializeSteeringCorrector(
+  bool enabled, std::shared_ptr<VehicleModelInterface> vehicle_model_ptr,
+  const SteeringCorrectorParams & params)
+{
+  m_steering_corrector_ptr =
+    enabled ? std::make_unique<SteeringCorrector>(vehicle_model_ptr, params) : nullptr;
+}
+
 }  // namespace autoware::motion::control::mpc_lateral_controller

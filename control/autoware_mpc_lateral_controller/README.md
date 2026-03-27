@@ -137,6 +137,24 @@ Defined in the `steering_offset` namespace. This logic is designed as simple as 
 
 {{ json_to_markdown("control/autoware_mpc_lateral_controller/schema/sub/debug_publish.json") }}
 
+#### Steering correction
+
+MPC optimization is calculated in frenet coordinates. Translating to world (map, euclidean) coordinates
+applies cumulative error which causes the output trajectory deviates from the one that is actually performed.
+
+If correction apply is enabled, after optimization, correction step is performed:
+- Generate frenet trajectory
+- For each point in reference trajectory:
+  - Get optimized steering for given point
+  - Find reference point in frenet trajectory (min. 3 points ahead)
+  - Calculate difference between frenet position and calculated world position
+  - If requiredments are fulfilled (min distance, max heading), steering correction i calculated.
+
+To enable/disable correction, set `steering_corrector.enabled` parameter.
+
+Note: calculated steering correction is not applied to the first steering command, which means that 
+correction does not affect the control, only predicted trajectory.
+
 #### Debug
 
 | Name                       | Type    | Description                                                                       | Default value |

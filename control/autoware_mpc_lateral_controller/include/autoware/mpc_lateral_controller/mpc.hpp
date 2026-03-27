@@ -18,6 +18,7 @@
 #include "autoware/mpc_lateral_controller/lowpass_filter.hpp"
 #include "autoware/mpc_lateral_controller/mpc_trajectory.hpp"
 #include "autoware/mpc_lateral_controller/qp_solver/qp_solver_interface.hpp"
+#include "autoware/mpc_lateral_controller/steering_corrector.hpp"
 #include "autoware/mpc_lateral_controller/steering_predictor.hpp"
 #include "autoware/mpc_lateral_controller/vehicle_model/vehicle_model_interface.hpp"
 #include "autoware/trajectory_follower_base/control_horizon.hpp"
@@ -229,6 +230,12 @@ private:
 
   rclcpp::Publisher<Trajectory>::SharedPtr m_debug_frenet_predicted_trajectory_pub;
   rclcpp::Publisher<Trajectory>::SharedPtr m_debug_resampled_reference_trajectory_pub;
+
+  /**
+   * @brief Corrects steering commands to better fit in world coordinates.
+   */
+  std::unique_ptr<SteeringCorrector> m_steering_corrector_ptr;
+
   /**
    * @brief Get variables for MPC calculation.
    * @param trajectory The reference trajectory.
@@ -535,6 +542,21 @@ public:
    * @param clock The shared pointer to the RCLCPP clock.
    */
   inline void setClock(rclcpp::Clock::SharedPtr clock) { m_clock = clock; }
+
+  /**
+   * @brief Initializes SteeringCorrector.
+   * @param enabled If enabled, m_steering_corrector_ptr is created, otherwise assigned to nullptr.
+   * @param vehicle_model_ptr Vehicle model used in MPC optimization/
+   * @param steer_limit Vehicle max steering angle.
+   * @param correction_limit Maximum correction that can be applied in single trajectory point.
+   * @param min_distance Minimum distance between following points in trajectory to apply
+   * correction.
+   * @param max_heading_diff Maximum heading difference to apply correction.
+   */
+  void initializeSteeringCorrector(
+    bool enabled, std::shared_ptr<VehicleModelInterface> vehicle_model_ptr,
+    const SteeringCorrectorParams & params);
+
 };  // class MPC
 }  // namespace autoware::motion::control::mpc_lateral_controller
 
