@@ -339,7 +339,7 @@ void ObstaclePointCloudBasedValidator::onObjectsAndObstaclePointCloud(
   bool validation_is_ready = true;
   if (!validator_->setKdtreeInputCloud(input_obstacle_pointcloud)) {
     RCLCPP_WARN_THROTTLE(
-      this->get_logger(), *this->get_clock(), 5,
+      this->get_logger(), *this->get_clock(), 5000,
       "obstacle pointcloud is empty! Can not validate objects.");
     validation_is_ready = false;
   }
