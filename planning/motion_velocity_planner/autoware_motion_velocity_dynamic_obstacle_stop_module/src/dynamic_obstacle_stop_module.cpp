@@ -183,6 +183,9 @@ VelocityPlanningResult DynamicObstacleStopModule::plan(
     }
   }
 
+  debug_data_.ego_footprints = ego_data.trajectory_footprints;
+  debug_data_.obstacle_footprints = obstacle_forward_footprints;
+  debug_data_.z = ego_data.pose.position.z;
   debug_publisher_->publish(create_debug_marker_array());
   virtual_wall_publisher_->publish(virtual_wall_marker_creator.create_markers());
 
@@ -192,9 +195,6 @@ VelocityPlanningResult DynamicObstacleStopModule::plan(
     "Total time = %2.2fus\n\tpreprocessing = %2.2fus\n\tfootprints = "
     "%2.2fus\n\tcollisions = %2.2fus\n",
     total_time_us, preprocessing_duration_us, footprints_duration_us, collisions_duration_us);
-  debug_data_.ego_footprints = ego_data.trajectory_footprints;
-  debug_data_.obstacle_footprints = obstacle_forward_footprints;
-  debug_data_.z = ego_data.pose.position.z;
   std::map<std::string, double> processing_times;
   processing_times["preprocessing"] = preprocessing_duration_us / 1000;
   processing_times["footprints"] = footprints_duration_us / 1000;
