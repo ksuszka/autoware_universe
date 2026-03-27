@@ -50,6 +50,7 @@ target_link_libraries(obstacle_pointcloud_based_validator
 ament_auto_add_library(object_lanelet_filter SHARED
   src/lanelet_filter/debug.cpp
   src/lanelet_filter/lanelet_filter.cpp
+  src/lanelet_filter/debug.cpp
   lib/utils/utils.cpp
 )
 

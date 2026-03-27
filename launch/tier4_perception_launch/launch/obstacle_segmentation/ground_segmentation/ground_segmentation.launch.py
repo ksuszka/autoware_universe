@@ -244,10 +244,19 @@ class GroundSegmentationPipeline:
             + self.ground_segmentation_param["common_crop_box_filter"]["parameters"]["margin_min_z"]
         )
         # Get the plugin name from the full plugin path
-        ground_segmentation_plugin_name = self.ground_segmentation_param["common_ground_filter"][
-            "plugin"
-        ]
-        ground_segmentation_plugin_name = ground_segmentation_plugin_name.split("::")[-1]
+        ground_segmentation_plugin_fullname = (
+            self.ground_segmentation_param["common_ground_filter"]["plugin"]
+        )
+
+        if ground_segmentation_plugin_fullname == "patchworkpp_ros::GroundSegmentationServer":
+            package = "patchworkpp"
+            plugin = "patchworkpp_ros::GroundSegmentationServer"
+        else:
+            package = "ground_segmentation"
+            ground_segmentation_plugin_name = (
+                ground_segmentation_plugin_fullname.split("::")[-1]
+            )
+            plugin = "autoware::ground_segmentation::" + ground_segmentation_plugin_name
 
         components = []
         components.append(
@@ -276,8 +285,8 @@ class GroundSegmentationPipeline:
 
         components.append(
             ComposableNode(
-                package="autoware_ground_segmentation",
-                plugin="autoware::ground_segmentation::" + ground_segmentation_plugin_name,
+                package=package,
+                plugin=plugin,
                 name="common_ground_filter",
                 remappings=[
                     ("input", "range_cropped/pointcloud"),

@@ -25,8 +25,6 @@
 #include <lanelet2_core/geometry/Polygon.h>
 
 #include <optional>
-#include <utility>
-#include <vector>
 
 namespace autoware::detected_object_validation
 {

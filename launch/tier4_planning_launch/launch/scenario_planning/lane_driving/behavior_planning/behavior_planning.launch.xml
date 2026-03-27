@@ -30,10 +30,14 @@
   <arg name="launch_virtual_traffic_light_module" default="true"/>
   <arg name="launch_no_stopping_area_module" default="true"/>
   <arg name="launch_stop_line_module" default="true"/>
+  <arg name="launch_stop_line_external_accept_module" default="true"/>
   <arg name="launch_occlusion_spot_module" default="true"/>
   <arg name="launch_run_out_module" default="true"/>
   <arg name="launch_speed_bump_module" default="true"/>
   <arg name="launch_no_drivable_lane_module" default="true"/>
+  <arg name="launch_near_field_module" default="true"/>
+  <arg name="launch_goal_shift_module" default="true"/>
+  <arg name="launch_comfort_speed_with_offset_module" default="true"/>
 
   <arg name="launch_module_list_end" default="&quot;&quot;]"/>
 
@@ -168,6 +172,26 @@
     value="$(eval &quot;'$(var behavior_velocity_planner_launch_modules)' + 'autoware::behavior_velocity_planner::NoDrivableLaneModulePlugin, '&quot;)"
     if="$(var launch_no_drivable_lane_module)"
   />
+  <let
+    name="behavior_velocity_planner_launch_modules"
+    value="$(eval &quot;'$(var behavior_velocity_planner_launch_modules)' + 'asystems::behavior_velocity_planner::StopLineExternalAcceptModulePlugin, '&quot;)"
+    if="$(var launch_stop_line_external_accept_module)"
+  />
+  <let
+    name="behavior_velocity_planner_launch_modules"
+    value="$(eval &quot;'$(var behavior_velocity_planner_launch_modules)' + 'asystems::behavior_velocity_planner::NearFieldModulePlugin, '&quot;)"
+    if="$(var launch_near_field_module)"
+  />
+  <let
+    name="behavior_velocity_planner_launch_modules"
+    value="$(eval &quot;'$(var behavior_velocity_planner_launch_modules)' + 'asystems::behavior_velocity_planner::GoalShiftModulePlugin, '&quot;)"
+    if="$(var launch_goal_shift_module)"
+  />
+  <let
+    name="behavior_velocity_planner_launch_modules"
+    value="$(eval &quot;'$(var behavior_velocity_planner_launch_modules)' + 'asystems::behavior_velocity_planner::ComfortSpeedWithOffsetModulePlugin, '&quot;)"
+    if="$(var launch_comfort_speed_with_offset_module)"
+  />
   <let name="behavior_velocity_planner_launch_modules" value="$(eval &quot;'$(var behavior_velocity_planner_launch_modules)' + '$(var launch_module_list_end)'&quot;)"/>
 
   <node_container pkg="rclcpp_components" exec="$(var container_type)" name="behavior_planning_container" namespace="" args="" output="both">
@@ -207,6 +231,7 @@
       <param from="$(var behavior_velocity_planner_detection_area_module_param_path)"/>
       <param from="$(var behavior_velocity_planner_intersection_module_param_path)"/>
       <param from="$(var behavior_velocity_planner_stop_line_module_param_path)"/>
+      <param from="$(var behavior_velocity_planner_stop_line_external_accept_module_param_path)"/>
       <param from="$(var behavior_velocity_planner_traffic_light_module_param_path)"/>
       <param from="$(var behavior_velocity_planner_virtual_traffic_light_module_param_path)"/>
       <param from="$(var behavior_velocity_planner_occlusion_spot_module_param_path)"/>
@@ -214,6 +239,8 @@
       <param from="$(var behavior_velocity_planner_run_out_module_param_path)"/>
       <param from="$(var behavior_velocity_planner_speed_bump_module_param_path)"/>
       <param from="$(var behavior_velocity_planner_no_drivable_lane_module_param_path)"/>
+      <param from="$(var behavior_velocity_planner_near_field_module_param_path)"/>
+      <param from="$(var behavior_velocity_planner_comfort_speed_with_offset_module_param_path)"/>
       <!-- composable node config -->
       <extra_arg name="use_intra_process_comms" value="false"/>
     </composable_node>
