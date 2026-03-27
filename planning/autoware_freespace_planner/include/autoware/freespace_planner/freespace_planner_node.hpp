@@ -31,12 +31,14 @@
 #ifndef AUTOWARE__FREESPACE_PLANNER__FREESPACE_PLANNER_NODE_HPP_
 #define AUTOWARE__FREESPACE_PLANNER__FREESPACE_PLANNER_NODE_HPP_
 
+#include "autoware/freespace_planner/stop_virtual_wall_manager.hpp"
 #include "autoware_utils/ros/logger_level_configure.hpp"
 
 #include <autoware/freespace_planning_algorithms/astar_search.hpp>
 #include <autoware/freespace_planning_algorithms/rrtstar.hpp>
 #include <autoware_utils/ros/polling_subscriber.hpp>
 #include <autoware_vehicle_info_utils/vehicle_info_utils.hpp>
+#include <diagnostic_updater/diagnostic_updater.hpp>
 #include <rclcpp/rclcpp.hpp>
 
 #include <autoware_internal_debug_msgs/msg/float64_stamped.hpp>
@@ -104,6 +106,39 @@ struct NodeParam
   int max_replan_count;
 };
 
+class FreespaceStatusUpdater
+{
+public:
+  explicit FreespaceStatusUpdater(rclcpp::Node & node) : updater_(&node)
+  {
+    updater_.setHardwareID("freespace_planner");
+    updater_.add("freespace_planner_status", this, &FreespaceStatusUpdater::check);
+  }
+
+  void setActive(bool active) noexcept { is_active_ = active; }
+  void onPlanResult(bool success) noexcept { last_plan_failed_ = !success; }
+  void forceUpdate() { updater_.force_update(); }
+
+private:
+  diagnostic_updater::Updater updater_;
+  bool is_active_{false};
+  bool last_plan_failed_{false};
+
+  void check(diagnostic_updater::DiagnosticStatusWrapper & stat)
+  {
+    if (is_active_) {
+      if (last_plan_failed_) {
+        stat.summary(
+          diagnostic_msgs::msg::DiagnosticStatus::WARN, "Freespace Planner failed to find a path");
+      } else {
+        stat.summary(diagnostic_msgs::msg::DiagnosticStatus::OK, "Freespace Planner is active");
+      }
+    } else {
+      stat.summary(diagnostic_msgs::msg::DiagnosticStatus::STALE, "Freespace Planner is inactive");
+    }
+  }
+};
+
 class FreespacePlannerNode : public rclcpp::Node
 {
 public:
@@ -118,10 +153,10 @@ private:
   rclcpp::Publisher<autoware_internal_debug_msgs::msg::Float64Stamped>::SharedPtr
     processing_time_pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr debug_marker_pub_;
-  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr virtual_wall_pub_;
 
-  rclcpp::Subscription<LaneletRoute>::SharedPtr route_sub_;
-
+  autoware_utils::InterProcessPollingSubscriber<
+    LaneletRoute, autoware_utils::polling_policy::Newest>
+    route_sub_{this, "~/input/route", rclcpp::QoS{1}.transient_local()};
   autoware_utils::InterProcessPollingSubscriber<OccupancyGrid> occupancy_grid_sub_{
     this, "~/input/occupancy_grid"};
   autoware_utils::InterProcessPollingSubscriber<Scenario> scenario_sub_{this, "~/input/scenario"};
@@ -154,12 +189,6 @@ private:
   bool is_new_parking_cycle_ = true;
   boost::optional<rclcpp::Time> obs_found_time_;
   boost::optional<geometry_msgs::msg::Pose> obstacle_pose_;
-  boost::optional<geometry_msgs::msg::Pose> stop_virtual_wall_pose_;
-  std::string collision_context_label_;
-  double base_link2front_ = 0.0;
-
-  enum class StopVirtualWallReason { None, ObstacleOnTrajectory, NoPathToGoal };
-  StopVirtualWallReason stop_virtual_wall_reason_ = StopVirtualWallReason::None;
 
   LaneletRoute::ConstSharedPtr route_;
   OccupancyGrid::ConstSharedPtr occupancy_grid_;
@@ -168,6 +197,12 @@ private:
   std::shared_ptr<autoware::route_handler::RouteHandler> route_handler_;
 
   std::deque<Odometry::ConstSharedPtr> odom_buffer_;
+
+  // diag
+  FreespaceStatusUpdater diag_status_;
+
+  // virtual wall
+  std::unique_ptr<StopVirtualWallManager> wall_manager_;
 
   // functions used in the constructor
   PlannerCommonParam getPlannerCommonParam();
@@ -215,7 +250,6 @@ private:
    */
   bool checkCurrentTrajectoryCollision();
 
-  void publishStopVirtualWall(const StopVirtualWallReason reason);
   void publishCollisionFootprintMarker(
     const geometry_msgs::msg::Pose & pose_local, const std::string & label);
 

@@ -30,14 +30,17 @@
 
 #include "autoware/freespace_planner/freespace_planner_node.hpp"
 
+#include "autoware/freespace_planner/stop_virtual_wall_manager.hpp"
 #include "autoware/freespace_planner/utils.hpp"
 #include "autoware/freespace_planning_algorithms/abstract_algorithm.hpp"
+#include "autoware/freespace_planning_algorithms/pose_fmt.hpp"
 
 #include <autoware/motion_utils/marker/marker_helper.hpp>
 #include <autoware/motion_utils/trajectory/trajectory.hpp>
 #include <autoware_utils/geometry/geometry.hpp>
 #include <autoware_utils/geometry/pose_deviation.hpp>
 #include <autoware_utils/system/stop_watch.hpp>
+#include <rclcpp/logging.hpp>
 
 #include <algorithm>
 #include <array>
@@ -56,6 +59,7 @@ constexpr double COLLISION_MARKER_LIFETIME_SEC = 10.0;
 constexpr double COLLISION_TEXT_HEIGHT_OFFSET = 1.0;  // meters above pose
 constexpr double COLLISION_TEXT_SCALE = 0.3;          // meters
 constexpr double COLLISION_FOOTPRINT_WIDTH = 0.05;    // line width in meters
+constexpr size_t OBSTACLE_WALL_MARGIN_INDEX = 2;
 
 /// @brief Create standard marker header (pure function)
 std_msgs::msg::Header create_marker_header(const std::string & frame_id, const rclcpp::Time & stamp)
@@ -78,10 +82,37 @@ visualization_msgs::msg::Marker create_base_marker(
   marker.action = visualization_msgs::msg::Marker::ADD;
   return marker;
 }
+
+boost::optional<geometry_msgs::msg::Pose> calc_obstacle_wall_pose_on_partial_trajectory(
+  const Trajectory & partial_trajectory, const geometry_msgs::msg::Pose & current_pose,
+  const geometry_msgs::msg::Pose & obstacle_pose)
+{
+  if (partial_trajectory.points.empty()) {
+    return {};
+  }
+
+  const size_t ego_index =
+    autoware::motion_utils::findNearestIndex(partial_trajectory.points, current_pose.position);
+  const size_t obstacle_index =
+    autoware::motion_utils::findNearestIndex(partial_trajectory.points, obstacle_pose.position);
+  const size_t clamped_obstacle_index =
+    std::min(obstacle_index, partial_trajectory.points.size() - 1);
+
+  const size_t margin_index = (clamped_obstacle_index > OBSTACLE_WALL_MARGIN_INDEX)
+                                ? (clamped_obstacle_index - OBSTACLE_WALL_MARGIN_INDEX)
+                                : 0U;
+  const size_t stop_index = std::max(ego_index, margin_index);
+
+  if (stop_index >= partial_trajectory.points.size()) {
+    return {};
+  }
+
+  return partial_trajectory.points.at(stop_index).pose;
+}
 }  // namespace
 
 FreespacePlannerNode::FreespacePlannerNode(const rclcpp::NodeOptions & node_options)
-: Node("freespace_planner", node_options)
+: Node("freespace_planner", node_options), diag_status_{*this}
 {
   using std::placeholders::_1;
 
@@ -112,7 +143,8 @@ FreespacePlannerNode::FreespacePlannerNode(const rclcpp::NodeOptions & node_opti
     vehicle_shape_.base_length = vehicle_info.wheel_base_m;
     vehicle_shape_.max_steering = vehicle_info.max_steer_angle_rad;
     vehicle_shape_.base2back = vehicle_info.rear_overhang_m;
-    base_link2front_ = vehicle_info.max_longitudinal_offset_m;
+    wall_manager_ =
+      std::make_unique<StopVirtualWallManager>(*this, vehicle_info.max_longitudinal_offset_m);
   }
 
   {
@@ -126,13 +158,7 @@ FreespacePlannerNode::FreespacePlannerNode(const rclcpp::NodeOptions & node_opti
       "~/debug/processing_time_ms", 1);
     debug_marker_pub_ =
       create_publisher<visualization_msgs::msg::MarkerArray>("~/debug/astar_search_tree", qos);
-    virtual_wall_pub_ = create_publisher<visualization_msgs::msg::MarkerArray>("~/virtual_wall", 1);
   }
-
-  // Subscribers
-  route_sub_ = create_subscription<LaneletRoute>(
-    "~/input/route", rclcpp::QoS{1}.transient_local(),
-    std::bind(&FreespacePlannerNode::onRoute, this, _1));
 
   // Planning (after publishers are created)
   initializePlanningAlgorithm();
@@ -185,16 +211,13 @@ bool FreespacePlannerNode::isPlanRequired()
 
   if (node_param_.replan_when_obstacle_found && checkCurrentTrajectoryCollision()) {
     RCLCPP_INFO(get_logger(), "New obstacle found on trajectory. Initiating replanning.");
-    stop_virtual_wall_pose_ = obstacle_pose_;
-    if (stop_virtual_wall_reason_ != StopVirtualWallReason::ObstacleOnTrajectory) {
-      publishStopVirtualWall(StopVirtualWallReason::ObstacleOnTrajectory);
-    }
+    const auto wall_pose = calc_obstacle_wall_pose_on_partial_trajectory(
+      partial_trajectory_, current_pose_.pose, *obstacle_pose_);
+    wall_manager_->onObstacle(wall_pose ? *wall_pose : *obstacle_pose_);
     return true;
   }
 
-  if (stop_virtual_wall_reason_ == StopVirtualWallReason::ObstacleOnTrajectory) {
-    publishStopVirtualWall(StopVirtualWallReason::None);
-  }
+  wall_manager_->onObstacleCleared();
 
   if (node_param_.replan_when_course_out) {
     const bool is_course_out = utils::calc_distance_2d(trajectory_, current_pose_.pose) >
@@ -264,8 +287,7 @@ void FreespacePlannerNode::updateTargetIndex()
       if (replan_count_ < node_param_.max_replan_count) {
         replan_count_++;
         algo_->setReparking(true);
-        is_completed_ = false;
-        reset_in_progress_ = true;
+        reset();
         RCLCPP_INFO(
           get_logger(), "Reparking enabled (replan count: %d) due to yaw error: %f", replan_count_,
           yaw_error);
@@ -303,9 +325,15 @@ void FreespacePlannerNode::onRoute(const LaneletRoute::ConstSharedPtr msg)
   goal_pose_.header = msg->header;
   goal_pose_.pose = msg->goal_pose;
 
+  algo_->setReparking(false);
   is_new_parking_cycle_ = true;
   replan_count_ = 0;
+  diag_status_.onPlanResult(true);
+  wall_manager_->onPlanSuccess();
   reset();
+
+  RCLCPP_INFO(
+    get_logger(), "%s", fmt::format("New route received. Goal pose - {}", goal_pose_.pose).c_str());
 }
 
 void FreespacePlannerNode::onOdometry(const Odometry::ConstSharedPtr msg)
@@ -329,6 +357,13 @@ void FreespacePlannerNode::onOdometry(const Odometry::ConstSharedPtr msg)
 
 void FreespacePlannerNode::updateData()
 {
+  {
+    auto route_msg = route_sub_.take_data();
+    if (route_msg) {
+      onRoute(route_msg);
+    }
+  }
+
   occupancy_grid_ = occupancy_grid_sub_.take_data();
 
   {
@@ -366,8 +401,12 @@ void FreespacePlannerNode::onTimer()
   autoware_utils::StopWatch<std::chrono::milliseconds> stop_watch;
 
   scenario_ = scenario_sub_.take_data();
+  diag_status_.setActive(utils::is_active(scenario_));
+  diag_status_.forceUpdate();
+
   if (!utils::is_active(scenario_)) {
     reset();
+    wall_manager_->onInactive();
     return;
   }
 
@@ -407,7 +446,6 @@ void FreespacePlannerNode::onTimer()
     }
 
     reset();
-
     reset_in_progress_ = true;
   }
 
@@ -434,6 +472,9 @@ void FreespacePlannerNode::onTimer()
         "Waiting for the vehicle to stop before generating a new trajectory.");
     }
   }
+
+  // Keep the virtual wall visible by re-publishing on every tick
+  wall_manager_->republishIfActive();
 
   // StopTrajectory
   if (trajectory_.points.size() <= 1) {
@@ -466,6 +507,8 @@ void FreespacePlannerNode::planTrajectory()
     return;
   }
 
+  wall_manager_->startPlanning(current_pose_.pose);
+
   // Provide robot shape and map for the planner
   algo_->setMap(*occupancy_grid_);
 
@@ -492,21 +535,19 @@ void FreespacePlannerNode::planTrajectory()
 
   if (result) {
     RCLCPP_DEBUG(get_logger(), "Found goal!");
+    diag_status_.onPlanResult(true);
+    wall_manager_->onPlanSuccess();
     trajectory_ = utils::create_trajectory(
       current_pose_, algo_->getWaypoints(), node_param_.waypoints_velocity);
     reversing_indices_ = utils::get_reversing_indices(trajectory_);
     prev_target_index_ = 0;
     target_index_ = utils::get_next_target_index(
       trajectory_.points.size(), reversing_indices_, prev_target_index_);
-    if (stop_virtual_wall_reason_ != StopVirtualWallReason::None) {
-      publishStopVirtualWall(StopVirtualWallReason::None);
-    }
   } else {
-    RCLCPP_INFO(get_logger(), "Can't find goal: %s", error_msg.c_str());
-    if (!stop_virtual_wall_pose_) {
-      stop_virtual_wall_pose_ = obstacle_pose_;
-    }
-    publishStopVirtualWall(StopVirtualWallReason::NoPathToGoal);
+    RCLCPP_WARN_THROTTLE(
+      get_logger(), *get_clock(), 30000, "Failed to find path: %s", error_msg.c_str());
+    diag_status_.onPlanResult(false);
+    wall_manager_->onPlanFailed();
     reset();
   }
 }
@@ -521,41 +562,6 @@ void FreespacePlannerNode::reset()
   parking_state_pub_->publish(is_completed_msg);
   obs_found_time_ = {};
   obstacle_pose_ = {};
-}
-
-void FreespacePlannerNode::publishStopVirtualWall(const StopVirtualWallReason reason)
-{
-  if (!virtual_wall_pub_) {
-    stop_virtual_wall_reason_ = reason;
-    return;
-  }
-
-  const auto now = get_clock()->now();
-  visualization_msgs::msg::MarkerArray markers;
-  if (reason == StopVirtualWallReason::None) {
-    markers = autoware::motion_utils::createDeletedStopVirtualWallMarker(now, 0);
-    stop_virtual_wall_pose_ = {};
-    collision_context_label_.clear();
-  } else {
-    if (!stop_virtual_wall_pose_) {
-      stop_virtual_wall_reason_ = reason;
-      return;
-    }
-    std::string text;
-    if (reason == StopVirtualWallReason::ObstacleOnTrajectory) {
-      text = "obstacle on trajectory";
-    } else if (collision_context_label_ == "start") {
-      text = "start pose in collision";
-    } else if (collision_context_label_ == "goal") {
-      text = "goal pose in collision";
-    } else {
-      text = "no path to goal (obstacle)";
-    }
-    markers = autoware::motion_utils::createStopVirtualWallMarker(
-      *stop_virtual_wall_pose_, text, now, 0, base_link2front_);
-  }
-  virtual_wall_pub_->publish(markers);
-  stop_virtual_wall_reason_ = reason;
 }
 
 void FreespacePlannerNode::publishCollisionFootprintMarker(
@@ -658,10 +664,9 @@ void FreespacePlannerNode::initializePlanningAlgorithm()
         return;
       }
       publishCollisionFootprintMarker(pose_local, label);
-      stop_virtual_wall_pose_ =
+      const auto global_pose =
         autoware::freespace_planning_algorithms::local2global(*occupancy_grid_, pose_local);
-      collision_context_label_ = label;
-      stop_virtual_wall_reason_ = StopVirtualWallReason::NoPathToGoal;
+      wall_manager_->setCollisionContext(global_pose, label);
     });
     algo_ = std::move(astar_algo);
   } else if (algo_name == "rrtstar") {
@@ -671,6 +676,7 @@ void FreespacePlannerNode::initializePlanningAlgorithm()
   }
   RCLCPP_INFO_STREAM(get_logger(), "initialize planning algorithm: " << algo_name);
 }
+
 }  // namespace autoware::freespace_planner
 
 #include <rclcpp_components/register_node_macro.hpp>

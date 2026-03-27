@@ -16,6 +16,7 @@
 
 #include "autoware/freespace_planning_algorithms/abstract_algorithm.hpp"
 #include "autoware/freespace_planning_algorithms/kinematic_bicycle_model.hpp"
+#include "autoware/freespace_planning_algorithms/pose_fmt.hpp"
 
 #include <autoware_utils/geometry/geometry.hpp>
 #include <autoware_utils/math/unit_conversion.hpp>
@@ -180,8 +181,9 @@ bool AstarSearch::makePlan(const Pose & start_pose, const Pose & goal_pose)
       goal_in_collision ? CollisionStatus::Collision : CollisionStatus::NoCollision);
     throw std::logic_error(
       fmt::format(
-        "Invalid start or goal pose due to collision (start collision: {}, goal collision: {})",
-        start_in_collision, goal_in_collision));
+        "Invalid start {} or goal pose {} due to collision (start collision: {}, goal collision: "
+        "{})",
+        start_pose_, goal_pose_, start_in_collision, goal_in_collision));
   }
 
   if (is_backward_search_) {
@@ -196,7 +198,8 @@ bool AstarSearch::makePlan(const Pose & start_pose, const Pose & goal_pose)
   setStartNode();
 
   if (!search()) {
-    throw std::logic_error("HA* failed to find path to goal");
+    throw std::logic_error(
+      fmt::format("HA* failed to find path from start {} to goal {}", start_pose_, goal_pose_));
   }
 
   return true;
@@ -254,7 +257,8 @@ bool AstarSearch::makePlan(
   }
 
   if (!search()) {
-    throw std::logic_error("HA* failed to find path to goal");
+    throw std::logic_error(
+      fmt::format("HA* failed to find path from start {} to goal {}", start_pose_, goal_pose_));
   }
 
   return true;

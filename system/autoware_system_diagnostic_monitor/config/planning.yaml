@@ -26,7 +26,10 @@ units:
       - { type: link, link: /autoware/planning/trajectory_validation/velocity_deviation }
 
   - path: /autoware/planning/emergency_stop
-    type: ok # Temporary workaround for issue SDP-6446
+    type: or
+    list:
+      - { type: link, link: /planning/path_optimizer_emergency_stop-error }
+      - { type: link, link: /planning/freespace_planner_status-error }
 
   - path: /autoware/planning/routing/state
     type: diag
@@ -103,4 +106,16 @@ units:
     type: diag
     node: path_optimizer
     name: path_optimizer_emergency_stop
+    timeout: 1.0
+
+  - path: /planning/freespace_planner_status-error
+    type: warn-to-ok
+    item:
+      type: link
+      link: /planning/freespace_planner_status
+
+  - path: /planning/freespace_planner_status
+    type: diag
+    node: freespace_planner
+    name: freespace_planner_status
     timeout: 1.0

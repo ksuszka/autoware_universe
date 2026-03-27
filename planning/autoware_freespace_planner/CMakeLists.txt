@@ -6,6 +6,7 @@ autoware_package()
 
 ament_auto_add_library(freespace_planner_node SHARED
   src/autoware_freespace_planner/freespace_planner_node.cpp
+  src/autoware_freespace_planner/stop_virtual_wall_manager.cpp
   src/autoware_freespace_planner/utils.cpp
 )
 
