@@ -221,4 +221,197 @@ TEST_F(PointsToCostmapTest, TestMakeCostmapFromPoints_invalidPoints_outOfGrid)
 
   EXPECT_EQ(nonempty_grid_cell_num, 0);
 }
+
+TEST_F(PointsToCostmapTest, TestFetchGridIndexFromPoint_CenteredGrid)
+{
+  // Test with grid centered at (0, 0) - matching grid_position
+  grid_map::GridMap gridmap = construct_gridmap();
+  PointsToCostmap point2costmap;
+  point2costmap.initGridmapParam(gridmap);
+
+  // Point at grid center should map to middle of grid
+  pcl::PointXYZ center_point;
+  center_point.x = 0.0;
+  center_point.y = 0.0;
+  center_point.z = 0.0;
+  
+  auto index = point2costmap.fetchGridIndexFromPoint(center_point);
+  
+  // For 20x20 grid with resolution 1.0, center should be at index (10, 10)
+  EXPECT_EQ(index.x(), 10);
+  EXPECT_EQ(index.y(), 10);
+}
+
+TEST_F(PointsToCostmapTest, TestFetchGridIndexFromPoint_OffsetGrid)
+{
+  // Test with grid centered at (5, 5) instead of (0, 0)
+  grid_map::GridMap gridmap;
+  gridmap.setFrameId("map");
+  gridmap.setGeometry(grid_map::Length(20.0, 20.0), 1.0);
+  gridmap.setPosition(grid_map::Position(5.0, 5.0));  // Offset center
+  gridmap.add("points", 0);
+
+  PointsToCostmap point2costmap;
+  point2costmap.initGridmapParam(gridmap);
+
+  // Point at grid center (5, 5) should map to middle of grid
+  pcl::PointXYZ center_point;
+  center_point.x = 5.0;
+  center_point.y = 5.0;
+  center_point.z = 0.0;
+  
+  auto index = point2costmap.fetchGridIndexFromPoint(center_point);
+  
+  EXPECT_EQ(index.x(), 10);
+  EXPECT_EQ(index.y(), 10);
+
+  // Point at origin (0, 0) should be offset from center
+  pcl::PointXYZ origin_point;
+  origin_point.x = 0.0;
+  origin_point.y = 0.0;
+  origin_point.z = 0.0;
+  
+  auto origin_index = point2costmap.fetchGridIndexFromPoint(origin_point);
+  
+  // (0,0) is 5 meters from grid center (5,5), so 5 cells offset
+  EXPECT_EQ(origin_index.x(), 15);
+  EXPECT_EQ(origin_index.y(), 15);
+}
+
+TEST_F(PointsToCostmapTest, TestFetchGridIndexFromPoint_EdgePoints)
+{
+  grid_map::GridMap gridmap = construct_gridmap();
+  PointsToCostmap point2costmap;
+  point2costmap.initGridmapParam(gridmap);
+
+  // Test points at grid edges
+  // Grid spans from -10 to +10 in both axes (20m total, centered at 0)
+  
+  // Top-right corner (near +10, +10)
+  pcl::PointXYZ top_right;
+  top_right.x = 9.5;
+  top_right.y = 9.5;
+  top_right.z = 0.0;
+  auto tr_index = point2costmap.fetchGridIndexFromPoint(top_right);
+  EXPECT_EQ(tr_index.x(), 0);
+  EXPECT_EQ(tr_index.y(), 0);
+}
+
+TEST_F(PointsToCostmapTest, TestFetchGridIndexFromPoint_EdgePoints2)
+{
+  grid_map::GridMap gridmap = construct_gridmap();
+  PointsToCostmap point2costmap;
+  point2costmap.initGridmapParam(gridmap);
+
+  // Bottom-left corner (near -10, -10)
+  pcl::PointXYZ bottom_left;
+  bottom_left.x = -9.5;
+  bottom_left.y = -9.5;
+  bottom_left.z = 0.0;
+  auto bl_index = point2costmap.fetchGridIndexFromPoint(bottom_left);
+  EXPECT_EQ(bl_index.x(), 19);
+  EXPECT_EQ(bl_index.y(), 19);
+}
+
+TEST_F(PointsToCostmapTest, TestFetchGridIndexFromPoint_MiddlePoint)
+{
+  grid_map::GridMap gridmap = construct_gridmap();
+  PointsToCostmap point2costmap;
+  point2costmap.initGridmapParam(gridmap);
+
+  // Test negative coordinates
+  pcl::PointXYZ neg_point;
+  neg_point.x = -0.1;
+  neg_point.y = -0.1;
+  neg_point.z = 0.0;
+  
+  auto index = point2costmap.fetchGridIndexFromPoint(neg_point);
+  // Verify it's valid and within grid bounds
+  EXPECT_TRUE(point2costmap.isValidInd(index));
+  EXPECT_EQ(index.x(), 10);
+  EXPECT_EQ(index.y(), 10);
+}
+
+TEST_F(PointsToCostmapTest, TestFetchGridIndexFromPoint_NegativeCoordinates)
+{
+  grid_map::GridMap gridmap = construct_gridmap();
+  PointsToCostmap point2costmap;
+  point2costmap.initGridmapParam(gridmap);
+
+  // Test negative coordinates
+  pcl::PointXYZ neg_point;
+  neg_point.x = -5.0;
+  neg_point.y = -3.0;
+  neg_point.z = 0.0;
+  
+  auto index = point2costmap.fetchGridIndexFromPoint(neg_point);
+  // Verify it's valid and within grid bounds
+  EXPECT_TRUE(point2costmap.isValidInd(index));
+  EXPECT_EQ(index.x(), 15);
+  EXPECT_EQ(index.y(), 13);
+}
+
+TEST_F(PointsToCostmapTest, TestFetchGridIndexFromPoint_DifferentResolution)
+{
+  // Test with different grid resolution
+  grid_map::GridMap gridmap;
+  gridmap.setFrameId("map");
+  gridmap.setGeometry(grid_map::Length(20.0, 20.0), 0.5);  // 0.5m resolution
+  gridmap.setPosition(grid_map::Position(0.0, 0.0));
+  gridmap.add("points", 0);
+
+  PointsToCostmap point2costmap;
+  point2costmap.initGridmapParam(gridmap);
+
+  // Center point
+  pcl::PointXYZ center_point;
+  center_point.x = 0.0;
+  center_point.y = 0.0;
+  center_point.z = 0.0;
+  
+  auto index = point2costmap.fetchGridIndexFromPoint(center_point);
+  
+  // With 0.5m resolution, 20m grid = 40 cells, center at (20, 20)
+  EXPECT_EQ(index.x(), 20);
+  EXPECT_EQ(index.y(), 20);
+}
+
+TEST_F(PointsToCostmapTest, TestFetchGridIndexFromPoint_ConsistencyCheck)
+{
+  // Verify that offset calculation formula is consistent
+  grid_map::GridMap gridmap = construct_gridmap();
+  PointsToCostmap point2costmap;
+  point2costmap.initGridmapParam(gridmap);
+
+  // Test a known point mapping
+  pcl::PointXYZ test_point;
+  test_point.x = 2.0;
+  test_point.y = 3.0;
+  test_point.z = 0.0;
+  
+  auto index1 = point2costmap.fetchGridIndexFromPoint(test_point);
+  
+  // Calculate expected index manually using the formula
+  const double grid_length_x = 20.0;
+  const double grid_length_y = 20.0;
+  const double grid_position_x = 0.0;
+  const double grid_position_y = 0.0;
+  const double grid_resolution = 1.0;
+  
+  const double origin_x_offset = grid_length_x / 2.0 - grid_position_x;  // 10.0
+  const double origin_y_offset = grid_length_y / 2.0 - grid_position_y;  // 10.0
+  
+  double mapped_x = (grid_length_x - origin_x_offset - test_point.x) / grid_resolution;
+  double mapped_y = (grid_length_y - origin_y_offset - test_point.y) / grid_resolution;
+  
+  int expected_x = static_cast<int>(std::floor(mapped_x));
+  int expected_y = static_cast<int>(std::floor(mapped_y));
+  
+  EXPECT_EQ(index1.x(), expected_x);
+  EXPECT_EQ(index1.y(), expected_y);
+  
+  // Verify the calculation: (20 - 10 - 2) / 1 = 8
+  EXPECT_EQ(expected_x, 8);
+  EXPECT_EQ(expected_y, 7);  // (20 - 10 - 3) / 1 = 7
+}
 }  // namespace autoware::costmap_generator

@@ -4,6 +4,7 @@ project(autoware_costmap_generator)
 find_package(autoware_cmake REQUIRED)
 autoware_package()
 
+find_package(autoware_universe_utils REQUIRED)
 find_package(PCL REQUIRED COMPONENTS common io)
 find_package(FLANN REQUIRED)
 
@@ -19,6 +20,9 @@ ament_auto_add_library(costmap_generator_lib SHARED
   src/utils/points_to_costmap.cpp
   src/utils/objects_to_costmap.cpp
   src/utils/object_map_utils.cpp
+)
+ament_target_dependencies(costmap_generator_lib
+  autoware_universe_utils
 )
 target_link_libraries(costmap_generator_lib
   ${PCL_LIBRARIES}

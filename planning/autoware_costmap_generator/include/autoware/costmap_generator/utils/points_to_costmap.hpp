@@ -57,6 +57,15 @@ namespace autoware::costmap_generator
 {
 class PointsToCostmap
 {
+  friend class PointsToCostmapTest_TestFetchGridIndexFromPoint_CenteredGrid_Test;
+  friend class PointsToCostmapTest_TestFetchGridIndexFromPoint_OffsetGrid_Test;
+  friend class PointsToCostmapTest_TestFetchGridIndexFromPoint_EdgePoints_Test;
+  friend class PointsToCostmapTest_TestFetchGridIndexFromPoint_EdgePoints2_Test;
+  friend class PointsToCostmapTest_TestFetchGridIndexFromPoint_MiddlePoint_Test;
+  friend class PointsToCostmapTest_TestFetchGridIndexFromPoint_NegativeCoordinates_Test;
+  friend class PointsToCostmapTest_TestFetchGridIndexFromPoint_DifferentResolution_Test;
+  friend class PointsToCostmapTest_TestFetchGridIndexFromPoint_ConsistencyCheck_Test;
+
 public:
   /// \brief calculate cost from sensor points
   /// \param[in] maximum_height_thres: Maximum height threshold for pointcloud data

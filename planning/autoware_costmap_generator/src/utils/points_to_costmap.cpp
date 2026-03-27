@@ -82,8 +82,11 @@ grid_map::Index PointsToCostmap::fetchGridIndexFromPoint(const pcl::PointXYZ & p
   double mapped_x = (grid_length_x_ - origin_x_offset - point.x) / grid_resolution_;
   double mapped_y = (grid_length_y_ - origin_y_offset - point.y) / grid_resolution_;
 
-  int mapped_x_ind = std::ceil(mapped_x);
-  int mapped_y_ind = std::ceil(mapped_y);
+  // Implementation is based on original function from gridmap_core https://github.com/ANYbotics/grid_map/blob/master/grid_map_core/src/GridMapMath.cpp#L147
+  // However in THEIR version, the range of coordinates is checked before index calculations
+  // We need to make sure that index is constistently matched with incoming points coordinates
+  int mapped_x_ind = static_cast<int>(std::floor(mapped_x));
+  int mapped_y_ind = static_cast<int>(std::floor(mapped_y));
   grid_map::Index index(mapped_x_ind, mapped_y_ind);
   return index;
 }

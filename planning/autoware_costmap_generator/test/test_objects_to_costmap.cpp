@@ -19,6 +19,7 @@
 #include <gtest/gtest.h>
 #include <tf2/utils.h>
 
+#include <cmath>
 #include <memory>
 
 namespace
@@ -52,6 +53,8 @@ protected:
   [[nodiscard]] PredictedObject get_object(
     const geometry_msgs::msg::Pose & pose, const geometry_msgs::msg::Vector3 dimension,
     const bool box_type = true) const;
+  [[nodiscard]] PredictedObject get_polygon_object_local_footprint(
+    const geometry_msgs::msg::Pose & pose, const geometry_msgs::msg::Vector3 dimension) const;
 
 public:
   double grid_resolution_ = 1;
@@ -111,6 +114,36 @@ PredictedObject ObjectsToCostMapTest::get_object(
 
   object.shape.footprint.points.emplace_back(
     toPoint32(autoware_utils::calc_offset_pose(pose, 0.5 * dimension.x, -0.5 * dimension.y, 0.0)));
+
+  return object;
+}
+
+PredictedObject ObjectsToCostMapTest::get_polygon_object_local_footprint(
+  const geometry_msgs::msg::Pose & pose, const geometry_msgs::msg::Vector3 dimension) const
+{
+  PredictedObject object;
+  object.classification.push_back(LABEL{});
+  object.classification.at(0).label = LABEL::CAR;
+  object.classification.at(0).probability = 0.8;
+  object.kinematics.initial_pose_with_covariance.pose = pose;
+  object.shape.dimensions = dimension;
+  object.shape.type = autoware_perception_msgs::msg::Shape::POLYGON;
+
+  const auto half_x = static_cast<float>(0.5 * dimension.x);
+  const auto half_y = static_cast<float>(0.5 * dimension.y);
+
+  const auto make_point32 = [](float x, float y, float z) {
+    geometry_msgs::msg::Point32 point;
+    point.x = x;
+    point.y = y;
+    point.z = z;
+    return point;
+  };
+
+  object.shape.footprint.points.emplace_back(make_point32(-half_x, -half_y, 0.0F));
+  object.shape.footprint.points.emplace_back(make_point32(-half_x, half_y, 0.0F));
+  object.shape.footprint.points.emplace_back(make_point32(half_x, half_y, 0.0F));
+  object.shape.footprint.points.emplace_back(make_point32(half_x, -half_y, 0.0F));
 
   return object;
 }
@@ -206,7 +239,7 @@ TEST_F(ObjectsToCostMapTest, TestMakeCostmapFromObjects_PolygonType)
   dimension.y = 3;
   dimension.z = 2;
 
-  const auto object = get_object(obj_pose, dimension, false);
+  const auto object = get_polygon_object_local_footprint(obj_pose, dimension);
   objs->objects.push_back(object);
 
   grid_map::GridMap gridmap = construct_gridmap();
@@ -250,5 +283,87 @@ TEST_F(ObjectsToCostMapTest, TestMakeCostmapFromObjects_PolygonType)
       EXPECT_DOUBLE_EQ(objects_costmap(i, j), object.classification.at(0).probability);
     }
   }
+}
+
+TEST_F(ObjectsToCostMapTest, TestMakeCostmapFromObjects_PolygonTypeYaw90Rotation)
+{
+  auto objs = std::make_shared<PredictedObjects>();
+  objs->header.frame_id = "map";
+
+  geometry_msgs::msg::Pose obj_pose;
+  obj_pose.position.x = 0.0;
+  obj_pose.position.y = 0.0;
+  obj_pose.position.z = 0.0;
+  const double yaw = std::acos(-1.0) / 2.0;
+  obj_pose.orientation.x = 0.0;
+  obj_pose.orientation.y = 0.0;
+  obj_pose.orientation.z = std::sin(yaw * 0.5);
+  obj_pose.orientation.w = std::cos(yaw * 0.5);
+
+  geometry_msgs::msg::Vector3 dimension;
+  dimension.x = 6.0;
+  dimension.y = 1.0;
+  dimension.z = 2.0;
+
+  const auto object = get_polygon_object_local_footprint(obj_pose, dimension);
+  objs->objects.push_back(object);
+
+  grid_map::GridMap gridmap = construct_gridmap();
+  ObjectsToCostmap objectsToCostmap;
+
+  const double expand_polygon_size = 0.0;
+  const double size_of_expansion_kernel = 1;  // do not expand for easy test check
+  grid_map::Matrix objects_costmap = objectsToCostmap.makeCostmapFromObjects(
+    gridmap, expand_polygon_size, size_of_expansion_kernel, objs);
+
+  grid_map::Index inside_index;
+  ASSERT_TRUE(gridmap.getIndex(grid_map::Position(0.0, 2.0), inside_index));
+  EXPECT_DOUBLE_EQ(objects_costmap(inside_index.x(), inside_index.y()),
+    object.classification.at(0).probability);
+
+  grid_map::Index outside_index;
+  ASSERT_TRUE(gridmap.getIndex(grid_map::Position(2.0, 0.0), outside_index));
+  EXPECT_DOUBLE_EQ(objects_costmap(outside_index.x(), outside_index.y()), 0.0);
+}
+
+TEST_F(ObjectsToCostMapTest, TestMakeCostmapFromObjects_PolygonTypeYaw45Rotation)
+{
+  auto objs = std::make_shared<PredictedObjects>();
+  objs->header.frame_id = "map";
+
+  geometry_msgs::msg::Pose obj_pose;
+  obj_pose.position.x = 0.0;
+  obj_pose.position.y = 0.0;
+  obj_pose.position.z = 0.0;
+  const double yaw = std::acos(-1.0) / 4.0;
+  obj_pose.orientation.x = 0.0;
+  obj_pose.orientation.y = 0.0;
+  obj_pose.orientation.z = std::sin(yaw * 0.5);
+  obj_pose.orientation.w = std::cos(yaw * 0.5);
+
+  geometry_msgs::msg::Vector3 dimension;
+  dimension.x = 6.0;
+  dimension.y = 2.0;
+  dimension.z = 2.0;
+
+  const auto object = get_polygon_object_local_footprint(obj_pose, dimension);
+  objs->objects.push_back(object);
+
+  grid_map::GridMap gridmap = construct_gridmap();
+  ObjectsToCostmap objectsToCostmap;
+
+  const double expand_polygon_size = 0.0;
+  const double size_of_expansion_kernel = 1;  // do not expand for easy test check
+  grid_map::Matrix objects_costmap = objectsToCostmap.makeCostmapFromObjects(
+    gridmap, expand_polygon_size, size_of_expansion_kernel, objs);
+
+  grid_map::Index inside_index;
+  ASSERT_TRUE(gridmap.getIndex(grid_map::Position(1.0, 2.0), inside_index));
+  EXPECT_DOUBLE_EQ(objects_costmap(inside_index.x(), inside_index.y()),
+    object.classification.at(0).probability);
+
+  grid_map::Index outside_index;
+  ASSERT_TRUE(gridmap.getIndex(grid_map::Position(2.0, 0.0), outside_index));
+  EXPECT_DOUBLE_EQ(objects_costmap(outside_index.x(), outside_index.y()), 0.0);
 }
 }  // namespace autoware::costmap_generator

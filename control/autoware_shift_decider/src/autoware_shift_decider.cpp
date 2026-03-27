@@ -64,6 +64,10 @@ void ShiftDecider::updateCurrentShiftCmd()
       shift_cmd_.command = GearCommand::DRIVE;
     } else if (control_cmd_->longitudinal.velocity < -vel_threshold) {
       shift_cmd_.command = GearCommand::REVERSE;
+    } else if (prev_shift_command == GearCommand::PARK) {
+      // Fix to change wheel steer when vehicle is stopped and steering angle can't be changed in PARK gear.
+      // Check: https://autonomous-systems.atlassian.net/wiki/x/AoBs2g
+      shift_cmd_.command = GearCommand::DRIVE;
     } else {
       shift_cmd_.command = prev_shift_command;
     }

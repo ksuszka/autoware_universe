@@ -43,7 +43,7 @@
  ********************/
 
 #include "autoware/costmap_generator/utils/objects_to_costmap.hpp"
-
+#include <autoware/universe_utils/geometry/geometry.hpp>
 #include <autoware/grid_map_utils/polygon_iterator.hpp>
 #include <grid_map_core/TypeDefs.hpp>
 
@@ -135,15 +135,25 @@ grid_map::Polygon ObjectsToCostmap::makePolygonFromObjectConvexHull(
   grid_map::Polygon polygon;
   polygon.setFrameId(header.frame_id);
 
-  double initial_z = in_object.shape.footprint.points[0].z;
-  for (size_t index = 0; index < in_object.shape.footprint.points.size(); index++) {
-    if (in_object.shape.footprint.points[index].z == initial_z) {
-      geometry_msgs::msg::Point centroid =
-        in_object.kinematics.initial_pose_with_covariance.pose.position;
-      geometry_msgs::msg::Point expanded_point =
-        makeExpandedPoint(centroid, in_object.shape.footprint.points[index], expand_polygon_size);
-      polygon.addVertex(grid_map::Position(expanded_point.x, expanded_point.y));
+  const auto & pose = in_object.kinematics.initial_pose_with_covariance.pose;
+  geometry_msgs::msg::Point centroid = pose.position;
+  auto rotation_only_pose = pose;
+  rotation_only_pose.position.x = 0.0;
+  rotation_only_pose.position.y = 0.0;
+  rotation_only_pose.position.z = 0.0;
+  const double initial_z = in_object.shape.footprint.points[0].z;
+  constexpr double z_epsilon = 0.01;  // 1 cm
+
+  for (const auto & local_point : in_object.shape.footprint.points) {
+    if (std::abs(local_point.z - initial_z) > z_epsilon) {
+      continue;
     }
+    const auto rotated_point =
+      autoware::universe_utils::transformPoint(local_point, rotation_only_pose);
+
+    geometry_msgs::msg::Point expanded_point =
+      makeExpandedPoint(centroid, rotated_point, expand_polygon_size);
+    polygon.addVertex(grid_map::Position(expanded_point.x, expanded_point.y));
   }
 
   return polygon;
