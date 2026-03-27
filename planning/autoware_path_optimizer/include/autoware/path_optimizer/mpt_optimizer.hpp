@@ -248,6 +248,7 @@ private:
     bool enable_warm_start;
     bool enable_manual_warm_start;
     bool enable_optimization_validation;
+    bool enable_keep_minimum_bounds_width;
     bool steer_limit_constraint;
     int mpt_visualize_sampling_num;  // for debug
 

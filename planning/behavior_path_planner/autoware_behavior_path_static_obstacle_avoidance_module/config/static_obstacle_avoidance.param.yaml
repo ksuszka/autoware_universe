@@ -126,6 +126,7 @@
         object_check_return_pose_distance: 20.0         # [m]
         # lost object compensation
         max_compensation_time: 2.0
+        object_pose_change_threshold: 0.15                     # [m]
 
         # detection area generation parameters
         detection_area:

@@ -279,6 +279,9 @@ struct AvoidanceParameters
   double object_last_seen_threshold{0.0};
 
   double unstable_classification_time{0.0};
+  
+  // Threshold distance for determining if an object has significantly changed its pose
+  double object_pose_change_threshold{0.15};
 
   // The avoidance path generation is performed when the shift distance of the
   // avoidance points is greater than this threshold.

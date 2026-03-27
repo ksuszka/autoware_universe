@@ -92,6 +92,8 @@ AvoidanceParameters getParameter(rclcpp::Node * node)
       get_or_declare_parameter<double>(*node, ns + "lower_distance_for_polygon_expansion");
     p.upper_distance_for_polygon_expansion =
       get_or_declare_parameter<double>(*node, ns + "upper_distance_for_polygon_expansion");
+    p.object_pose_change_threshold =
+      get_or_declare_parameter<double>(*node, ns + "object_pose_change_threshold");
   }
 
   // target filtering

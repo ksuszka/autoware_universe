@@ -136,6 +136,18 @@ bool isLeft(const geometry_msgs::msg::Pose & pose, const geometry_msgs::msg::Poi
   return diff_theta > 0;
 }
 
+bool isBoundSegmentAlignedWithVehicle(
+  const geometry_msgs::msg::Pose & pose, const geometry_msgs::msg::Point & bound_start,
+  const geometry_msgs::msg::Point & bound_end)
+{
+  const double vehicle_yaw = tf2::getYaw(pose.orientation);
+  const double bound_yaw = autoware_utils::calc_azimuth_angle(bound_start, bound_end);
+  const double yaw_diff = autoware_utils::normalize_radian(bound_yaw - vehicle_yaw);
+  // If the angle between the vehicle heading and the bound segment is less than 90 degrees,
+  // they are considered to be facing the same direction.
+  return std::abs(yaw_diff) < (M_PI / 2.0);
+}
+
 // NOTE: Regarding boundary's sign, left is positive, and right is negative
 double calcLateralDistToBounds(
   const geometry_msgs::msg::Pose & pose, const std::vector<geometry_msgs::msg::Point> & bound,
@@ -152,11 +164,23 @@ double calcLateralDistToBounds(
     autoware_utils::calc_offset_pose(pose, 0.0, min_lat_offset, 0.0).position;
 
   double closest_dist_to_bound = max_lat_offset;
-  for (size_t i = 0; i < bound.size() - 1; ++i) {
+  for (size_t i = 0; i + 1 < bound.size(); ++i) {
+
+    if (!isBoundSegmentAlignedWithVehicle(
+      pose, bound.at(i), bound.at(i + 1))) {
+      continue;
+    };
+
     const auto intersect_point = autoware_utils::intersect(
       min_lat_offset_point, max_lat_offset_point, bound.at(i), bound.at(i + 1));
     if (intersect_point) {
       const bool is_point_left = isLeft(pose, *intersect_point);
+
+      // only consider intersections that are on the side we are checking
+      if (is_point_left != is_left_bound) {
+        continue;
+      }
+
       const double dist_to_bound =
         autoware_utils::calc_distance2d(pose.position, *intersect_point) *
         (is_point_left ? 1.0 : -1.0);
@@ -183,6 +207,8 @@ MPTOptimizer::MPTParam::MPTParam(
     enable_manual_warm_start = node->declare_parameter<bool>("mpt.option.enable_manual_warm_start");
     enable_optimization_validation =
       node->declare_parameter<bool>("mpt.option.enable_optimization_validation");
+    enable_keep_minimum_bounds_width =
+      node->declare_parameter<bool>("mpt.option.enable_keep_minimum_bounds_width");
     mpt_visualize_sampling_num = node->declare_parameter<int>("mpt.option.visualize_sampling_num");
   }
 
@@ -297,6 +323,9 @@ void MPTOptimizer::MPTParam::onParam(const std::vector<rclcpp::Parameter> & para
     update_param<bool>(parameters, "mpt.option.enable_manual_warm_start", enable_manual_warm_start);
     update_param<bool>(
       parameters, "mpt.option.enable_optimization_validation", enable_optimization_validation);
+    update_param<bool>(
+      parameters, "mpt.avoidance.enable_keep_minimum_bounds_width",
+      enable_keep_minimum_bounds_width);
     update_param<int>(parameters, "mpt.option.visualize_sampling_num", mpt_visualize_sampling_num);
   }
 
@@ -787,8 +816,8 @@ void MPTOptimizer::updateBounds(
 {
   autoware_utils::ScopedTimeTrack st(__func__, *time_keeper_);
 
-  const double soft_road_clearance =
-    mpt_param_.soft_clearance_from_road + vehicle_info_.vehicle_width_m / 2.0;
+  const double hard_road_clearance =
+    mpt_param_.hard_clearance_from_road + vehicle_info_.vehicle_width_m / 2.0;
 
   // calculate distance to left/right bound on each reference point
   // NOTE: Reference points is sometimes not fully covered by the drivable area.
@@ -799,9 +828,9 @@ void MPTOptimizer::updateBounds(
   for (size_t i = 0; i < ref_points.size(); ++i) {
     const auto ref_point_for_bound_search = ref_points.at(std::max(min_ref_point_index, i));
     const double dist_to_left_bound = calcLateralDistToBounds(
-      ref_point_for_bound_search.pose, left_bound, soft_road_clearance, true);
+      ref_point_for_bound_search.pose, left_bound, hard_road_clearance, true);
     const double dist_to_right_bound = calcLateralDistToBounds(
-      ref_point_for_bound_search.pose, right_bound, soft_road_clearance, false);
+      ref_point_for_bound_search.pose, right_bound, hard_road_clearance, false);
     ref_points.at(i).bounds = Bounds{dist_to_right_bound, dist_to_left_bound};
   }
 
@@ -809,10 +838,18 @@ void MPTOptimizer::updateBounds(
   // NOTE: The drivable area's width is sometimes narrower than the vehicle width which means
   // infeasible to run especially when obstacles are extracted from the drivable area.
   //       In this case, the drivable area's width is forced to be wider.
-  keepMinimumBoundsWidth(ref_points);
+  if (mpt_param_.enable_keep_minimum_bounds_width) {
+    keepMinimumBoundsWidth(ref_points);
+  }
 
   // extend violated bounds, where the input path is outside the drivable area
   ref_points = extendViolatedBounds(ref_points);
+
+  // add soft_road_clearance
+  for (auto & ref_point : ref_points) {
+    ref_point.bounds.lower_bound += mpt_param_.soft_clearance_from_road;
+    ref_point.bounds.upper_bound -= mpt_param_.soft_clearance_from_road;
+  }
 
   // keep previous boundary's width around ego to avoid sudden steering
   avoidSuddenSteering(ref_points, ego_pose, ego_vel);
@@ -1017,42 +1054,18 @@ std::vector<ReferencePoint> MPTOptimizer::extendViolatedBounds(
   auto extended_ref_points = ref_points;
   const int max_length_idx = std::floor(
     mpt_param_.max_longitudinal_margin_for_bound_violation / mpt_param_.delta_arc_length);
-  for (int i = 0; i < static_cast<int>(ref_points.size()) - 1; ++i) {
-    // before violation
-    if (
-      ref_points.at(i).bounds.lower_bound <= 0.0 &&
-      0.0 <= ref_points.at(i + 1).bounds.lower_bound) {
-      for (int j = 0; j <= max_length_idx; ++j) {
-        const int k = std::clamp(i - j, 0, static_cast<int>(ref_points.size()) - 1);
-        extended_ref_points.at(k).bounds.lower_bound = ref_points.at(i + 1).bounds.lower_bound;
-      }
+  for (int i = 0; i < static_cast<int>(ref_points.size()); ++i) {
+    double min_lower_bound = ref_points.at(i).bounds.lower_bound;
+    double min_upper_bound = ref_points.at(i).bounds.upper_bound;
+
+    for (int j = -max_length_idx; j <= max_length_idx; ++j) {
+      const int k = std::clamp(i + j, 0, static_cast<int>(ref_points.size()) - 1);
+      min_lower_bound = std::max(min_lower_bound, ref_points.at(k).bounds.lower_bound);
+      min_upper_bound = std::min(min_upper_bound, ref_points.at(k).bounds.upper_bound);
     }
 
-    if (
-      0.0 <= ref_points.at(i).bounds.upper_bound &&
-      ref_points.at(i + 1).bounds.upper_bound <= 0.0) {
-      for (int j = 0; j <= max_length_idx; ++j) {
-        const int k = std::clamp(i - j, 0, static_cast<int>(ref_points.size()) - 1);
-        extended_ref_points.at(k).bounds.upper_bound = ref_points.at(i + 1).bounds.upper_bound;
-      }
-    }
-
-    // after violation
-    if (0 <= ref_points.at(i).bounds.lower_bound && ref_points.at(i + 1).bounds.lower_bound <= 0) {
-      for (int j = 0; j <= max_length_idx; ++j) {
-        const int k = std::clamp(i + j, 0, static_cast<int>(ref_points.size()) - 1);
-        extended_ref_points.at(k).bounds.lower_bound = ref_points.at(i).bounds.lower_bound;
-      }
-    }
-
-    if (
-      ref_points.at(i).bounds.upper_bound <= 0.0 &&
-      0.0 <= ref_points.at(i + 1).bounds.upper_bound) {
-      for (int j = 0; j <= max_length_idx; ++j) {
-        const int k = std::clamp(i + j, 0, static_cast<int>(ref_points.size()) - 1);
-        extended_ref_points.at(k).bounds.upper_bound = ref_points.at(i).bounds.upper_bound;
-      }
-    }
+    extended_ref_points.at(i).bounds.lower_bound = min_lower_bound;
+    extended_ref_points.at(i).bounds.upper_bound = min_upper_bound;
   }
 
   return extended_ref_points;

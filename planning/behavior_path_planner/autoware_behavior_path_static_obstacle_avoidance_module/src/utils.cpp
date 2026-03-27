@@ -1788,7 +1788,15 @@ void fillObjectMovingTime(
   const auto is_new_object = same_id_obj == stopped_objects.end();
   const rclcpp::Time now = rclcpp::Clock(RCL_ROS_TIME).now();
 
-  if (!is_faster_than_threshold) {
+  const bool object_pose_changed = [&]() {
+    if (is_new_object) {
+      return false;
+    }
+    auto distance = calc_distance2d(same_id_obj->init_pose, object_data.getPose());
+    return distance > parameters->object_pose_change_threshold;
+  }();
+
+  if (!is_faster_than_threshold && !object_pose_changed) {
     object_data.last_stop = now;
     object_data.move_time = 0.0;
     if (is_new_object) {
@@ -1819,7 +1827,7 @@ void fillObjectMovingTime(
   object_data.stop_time = 0.0;
   object_data.init_pose = object_data.getPose();
 
-  if (object_data.move_time > object_parameter.moving_time_threshold) {
+  if (object_data.move_time > object_parameter.moving_time_threshold  || object_pose_changed) {
     stopped_objects.erase(same_id_obj);
   }
 }
