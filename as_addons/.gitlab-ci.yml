@@ -1,0 +1,69 @@
+stages:
+  - build
+  - deploy
+  - trigger_ci
+
+default:
+  interruptible: true
+
+variables:
+  FORCE_DEPLOY:
+    description: "Set this variable to a non-empty value to force image deploy."
+
+.build_template:
+  stage: build
+  tags:
+    - heavy-memory-build
+  variables:
+    DOCKER_BUILDKIT: 1
+    BUILDKIT_PROGRESS: "plain"
+    IMAGE_WITH_TAG: $CI_REGISTRY_IMAGE:$ROS_DISTRO-b$CI_PIPELINE_IID-commit-$CI_COMMIT_SHORT_SHA
+    BUILD_REF: $CI_PROJECT_URL/commit/$CI_COMMIT_SHA
+  before_script:
+    # https://docs.gitlab.com/ee/ci/ssh_keys/
+    - apk add bash && rm -rf /var/cache/apk/*
+    - mkdir -pm 700 ~/.ssh
+    - eval $(ssh-agent -s)
+    - cat $SSH_PRIVATE_KEY | tr -d '\r' | ssh-add -
+  script:
+    - echo Building autoware universe image $IMAGE_WITH_TAG for ROS_DISTRO=$ROS_DISTRO ...
+    - export TIMESTAMP=$(date +%s)
+    - docker build --ssh default -f as_addons/Dockerfile --tag $IMAGE_WITH_TAG --build-arg ROS_DISTRO=$ROS_DISTRO --build-arg BUILD_REF=$BUILD_REF --build-arg TIMESTAMP=$TIMESTAMP .
+
+.deploy_template:
+  stage: deploy
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $FORCE_DEPLOY
+  tags:
+    - as-docker-build
+  variables:
+    IMAGE_WITH_TAG: $CI_REGISTRY_IMAGE:$ROS_DISTRO-b$CI_PIPELINE_IID-commit-$CI_COMMIT_SHORT_SHA
+  script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker tag $IMAGE_WITH_TAG $CI_REGISTRY_IMAGE:$ROS_DISTRO-latest
+    - docker push $IMAGE_WITH_TAG
+    - docker push $CI_REGISTRY_IMAGE:$ROS_DISTRO-latest
+
+build:humble:
+  variables:
+    ROS_DISTRO: humble
+  extends: .build_template
+
+deploy:humble:
+  variables:
+    ROS_DISTRO: humble
+  extends: .deploy_template
+  needs:
+    - build:humble
+
+trigger_build_as_drive:
+  stage: trigger_ci
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $FORCE_DEPLOY
+  inherit:
+    variables: false
+  trigger:
+    project: as/sdp/as_drive
+    branch: main
