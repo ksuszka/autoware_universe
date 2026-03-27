@@ -108,6 +108,7 @@
           th_error_eclipse_long_radius : 0.6
         lower_distance_for_polygon_expansion: 30.0      # [m] FOR DEVELOPER
         upper_distance_for_polygon_expansion: 100.0     # [m] FOR DEVELOPER
+        object_pose_change_threshold: 0.15              # [m] FOR DEVELOPER
 
       # For target object filtering
       target_filtering:
@@ -126,7 +127,6 @@
         object_check_return_pose_distance: 20.0         # [m]
         # lost object compensation
         max_compensation_time: 2.0
-        object_pose_change_threshold: 0.15                     # [m]
 
         # detection area generation parameters
         detection_area:

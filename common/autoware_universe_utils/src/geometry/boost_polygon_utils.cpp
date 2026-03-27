@@ -16,9 +16,12 @@
 
 #include "autoware/universe_utils/geometry/geometry.hpp"
 
+#include <boost/geometry/algorithms/buffer.hpp>
 #include <boost/geometry/geometry.hpp>
 
 #include <tf2/utils.h>
+
+#include <cmath>
 
 namespace
 {
@@ -271,5 +274,51 @@ Polygon2d expandPolygon(const Polygon2d & input_polygon, const double offset)
 
   boost::geometry::correct(expanded_polygon);
   return expanded_polygon;
+}
+
+Polygon2d expandPolygonUniform(const Polygon2d & input_polygon, const double offset)
+{
+  if (offset == 0.0) {
+    Polygon2d corrected_polygon = input_polygon;
+    boost::geometry::correct(corrected_polygon);
+    return corrected_polygon;
+  }
+
+  MultiPolygon2d buffered_polygons;
+  const bg::strategy::buffer::distance_symmetric<double> distance_strategy(offset);
+  const bg::strategy::buffer::side_straight side_strategy;
+  const bg::strategy::buffer::join_round join_strategy(8);
+  const bg::strategy::buffer::end_round end_strategy(8);
+  const bg::strategy::buffer::point_circle point_strategy(8);
+
+  bg::buffer(
+    input_polygon, buffered_polygons, distance_strategy, side_strategy, join_strategy,
+    end_strategy, point_strategy);
+
+  if (buffered_polygons.empty()) {
+    // If Polygon was completely shrunk (large negative offset) - return corrected original
+    Polygon2d original_polygon = input_polygon;
+    boost::geometry::correct(original_polygon);
+    return original_polygon;
+  }
+
+  const bool is_clockwise = isClockwise(input_polygon);
+  Polygon2d selected_polygon;
+  double max_area = -1.0;
+  for (auto & polygon : buffered_polygons) {
+    bg::correct(polygon);
+    const double area = std::abs(bg::area(polygon));
+    if (area > max_area) {
+      max_area = area;
+      selected_polygon = polygon;
+    }
+  }
+
+  // Simplify to reduce vertices - tolerance should be small relative to offset
+  Polygon2d simplified_polygon;
+  const double tolerance = std::abs(offset) * 0.01;  // 1% of offset distance
+  bg::simplify(selected_polygon, simplified_polygon, tolerance);
+
+  return is_clockwise ? simplified_polygon : inverseClockwise(simplified_polygon);
 }
 }  // namespace autoware::universe_utils

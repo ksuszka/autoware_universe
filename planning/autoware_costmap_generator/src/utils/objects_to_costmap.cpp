@@ -43,9 +43,12 @@
  ********************/
 
 #include "autoware/costmap_generator/utils/objects_to_costmap.hpp"
+#include <autoware/universe_utils/geometry/boost_polygon_utils.hpp>
 #include <autoware/universe_utils/geometry/geometry.hpp>
 #include <autoware/grid_map_utils/polygon_iterator.hpp>
 #include <grid_map_core/TypeDefs.hpp>
+#include <rclcpp/logger.hpp>
+#include <rclcpp/logging.hpp>
 
 #include <Eigen/src/Core/util/Constants.h>
 #include <tf2/utils.h>
@@ -106,26 +109,6 @@ grid_map::Polygon ObjectsToCostmap::makePolygonFromObjectBox(
   return polygon;
 }
 
-geometry_msgs::msg::Point ObjectsToCostmap::makeExpandedPoint(
-  const geometry_msgs::msg::Point & in_centroid,
-  const geometry_msgs::msg::Point32 & in_corner_point, const double expand_polygon_size)
-{
-  geometry_msgs::msg::Point expanded_point;
-
-  if (expand_polygon_size == 0) {
-    expanded_point.x = in_corner_point.x;
-    expanded_point.y = in_corner_point.y;
-    return expanded_point;
-  }
-
-  double theta = std::atan2(in_corner_point.y - in_centroid.y, in_corner_point.x - in_centroid.x);
-  double delta_x = expand_polygon_size * std::cos(theta);
-  double delta_y = expand_polygon_size * std::sin(theta);
-  expanded_point.x = in_centroid.x + in_corner_point.x + delta_x;
-  expanded_point.y = in_centroid.y + in_corner_point.y + delta_y;
-
-  return expanded_point;
-}
 
 grid_map::Polygon ObjectsToCostmap::makePolygonFromObjectConvexHull(
   const std_msgs::msg::Header & header,
@@ -135,25 +118,16 @@ grid_map::Polygon ObjectsToCostmap::makePolygonFromObjectConvexHull(
   grid_map::Polygon polygon;
   polygon.setFrameId(header.frame_id);
 
-  const auto & pose = in_object.kinematics.initial_pose_with_covariance.pose;
-  geometry_msgs::msg::Point centroid = pose.position;
-  auto rotation_only_pose = pose;
-  rotation_only_pose.position.x = 0.0;
-  rotation_only_pose.position.y = 0.0;
-  rotation_only_pose.position.z = 0.0;
-  const double initial_z = in_object.shape.footprint.points[0].z;
-  constexpr double z_epsilon = 0.01;  // 1 cm
+  auto poly2d = autoware::universe_utils::toPolygon2d(
+    in_object.kinematics.initial_pose_with_covariance.pose, in_object.shape);
 
-  for (const auto & local_point : in_object.shape.footprint.points) {
-    if (std::abs(local_point.z - initial_z) > z_epsilon) {
-      continue;
-    }
-    const auto rotated_point =
-      autoware::universe_utils::transformPoint(local_point, rotation_only_pose);
 
-    geometry_msgs::msg::Point expanded_point =
-      makeExpandedPoint(centroid, rotated_point, expand_polygon_size);
-    polygon.addVertex(grid_map::Position(expanded_point.x, expanded_point.y));
+  if (expand_polygon_size >= 0.0) {
+    poly2d = autoware::universe_utils::expandPolygonUniform(poly2d, expand_polygon_size);
+  }
+
+  for (const auto & point : poly2d.outer()) {
+    polygon.addVertex(grid_map::Position(point.x(), point.y()));
   }
 
   return polygon;
@@ -214,6 +188,9 @@ grid_map::Matrix ObjectsToCostmap::makeCostmapFromObjects(
       polygon = makePolygonFromObjectBox(in_objects->header, object, expand_polygon_size);
     } else if (object.shape.type == autoware_perception_msgs::msg::Shape::CYLINDER) {
       // TODO(Kenji Miyake): Add makePolygonFromObjectCylinder and remove NOLINT
+      RCLCPP_WARN(
+        rclcpp::get_logger("ObjectsCostmap"),
+        "Cylinder shapes are currently unsupported, falling back to BoundingBox.");
       polygon = makePolygonFromObjectBox(in_objects->header, object, expand_polygon_size);
     }
     const auto highest_probability_label = *std::max_element(

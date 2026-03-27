@@ -119,13 +119,14 @@ MarkerArray createToDrivableBoundDistance(const ObjectDataArray & objects, std::
 
     {
       auto marker = create_default_marker(
-        "map", rclcpp::Clock{RCL_ROS_TIME}.now(), ns, 0L, Marker::TEXT_VIEW_FACING,
+        "map", rclcpp::Clock{RCL_ROS_TIME}.now(), ns + "_text", 0L, Marker::TEXT_VIEW_FACING,
         create_marker_scale(0.5, 0.5, 0.5), create_marker_color(1.0, 1.0, 0.0, 1.0));
 
       marker.pose.position = object.narrowest_place.value().second;
       std::ostringstream string_stream;
       string_stream << object.to_road_shoulder_distance << "[m]";
       marker.text = string_stream.str();
+      marker.id = uuidToInt32(object.object.object_id);
       msg.markers.push_back(marker);
     }
   }

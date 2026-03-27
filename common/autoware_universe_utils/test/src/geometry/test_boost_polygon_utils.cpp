@@ -329,3 +329,128 @@ TEST(boost_geometry, boost_expandPolygon)
     EXPECT_THROW(expandPolygon(empty_poly, 1.0), std::out_of_range);
   }
 }
+
+TEST(boost_geometry, boost_expandPolygonUniform)
+{
+  using autoware::universe_utils::expandPolygonUniform;
+  constexpr double epsilon = 1e-6;
+
+  {  // box with a certain offset
+    Polygon2d box_poly{{{-1.0, -1.0}, {-1.0, 1.0}, {1.0, 1.0}, {1.0, -1.0}, {-1.0, -1.0}}};
+    const auto expanded_poly = expandPolygonUniform(box_poly, 1.0);
+
+    // Should expand uniformly by 1.0 meter on all sides
+    // boost::buffer creates more points with rounded corners
+    EXPECT_GT(expanded_poly.outer().size(), 4);
+
+    // Check that polygon area increased
+    const double original_area = std::abs(boost::geometry::area(box_poly));
+    const double expanded_area = std::abs(boost::geometry::area(expanded_poly));
+    EXPECT_GT(expanded_area, original_area);
+
+    // For a square expanding by 1.0 on all sides:
+    // Original: 2x2 = 4
+    // Expanded: 16 - 0.86 ≈ 15.14, but due to simplification, it is slightly smaller
+    EXPECT_NEAR(expanded_area, 15.14, 0.5);
+  }
+
+  {  // box with no offset
+    Polygon2d box_poly{{{-1.0, -1.0}, {-1.0, 1.0}, {1.0, 1.0}, {1.0, -1.0}, {-1.0, -1.0}}};
+    const auto expanded_poly = expandPolygonUniform(box_poly, 0.0);
+
+    // Should return the same polygon
+    EXPECT_EQ(expanded_poly.outer().size(), box_poly.outer().size());
+    for (size_t i = 0; i < box_poly.outer().size(); ++i) {
+      EXPECT_NEAR(expanded_poly.outer().at(i).x(), box_poly.outer().at(i).x(), epsilon);
+      EXPECT_NEAR(expanded_poly.outer().at(i).y(), box_poly.outer().at(i).y(), epsilon);
+    }
+  }
+
+  {  // clockwise polygon should remain clockwise
+    Polygon2d clock_wise_polygon{{{0.0, 0.0}, {0.0, 1.0}, {1.0, 1.0}, {1.0, 0.0}, {0.0, 0.0}}};
+    const auto expanded_poly = expandPolygonUniform(clock_wise_polygon, 0.5);
+
+    EXPECT_TRUE(autoware::universe_utils::isClockwise(expanded_poly));
+  }
+
+  {  // anti-clockwise polygon should become clockwise
+    Polygon2d anti_clock_wise_polygon{{{0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}, {0.0, 0.0}}};
+    const auto expanded_poly = expandPolygonUniform(anti_clock_wise_polygon, 0.5);
+
+    EXPECT_TRUE(autoware::universe_utils::isClockwise(expanded_poly));
+  }
+
+  {  // small offset
+    Polygon2d box_poly{{{-1.0, -1.0}, {-1.0, 1.0}, {1.0, 1.0}, {1.0, -1.0}, {-1.0, -1.0}}};
+    const auto expanded_poly = expandPolygonUniform(box_poly, 0.1);
+
+    const double original_area = std::abs(boost::geometry::area(box_poly));
+    const double expanded_area = std::abs(boost::geometry::area(expanded_poly));
+    EXPECT_GT(expanded_area, original_area);
+    // Original: 4.0, Expanded: approximately (2.2)^2 = 4.84
+    EXPECT_NEAR(expanded_area, 4.84, 0.2);
+  }
+
+  {  // negative offset (shrinking)
+    Polygon2d box_poly{{{-2.0, -2.0}, {-2.0, 2.0}, {2.0, 2.0}, {2.0, -2.0}, {-2.0, -2.0}}};
+    const auto shrunk_poly = expandPolygonUniform(box_poly, -0.5);
+
+    const double original_area = std::abs(boost::geometry::area(box_poly));
+    const double shrunk_area = std::abs(boost::geometry::area(shrunk_poly));
+    EXPECT_LT(shrunk_area, original_area);
+    // Original: 16.0, Shrunk: approximately (3.0)^2 = 9.0
+    EXPECT_NEAR(shrunk_area, 9.0, 1.0);
+  }
+
+  {  // triangle expansion
+    Polygon2d triangle_poly{{{0.0, 0.0}, {1.0, 2.0}, {2.0, 0.0}, {0.0, 0.0}}};
+    const auto expanded_poly = expandPolygonUniform(triangle_poly, 0.5);
+
+    const double original_area = std::abs(boost::geometry::area(triangle_poly));
+    const double expanded_area = std::abs(boost::geometry::area(expanded_poly));
+    EXPECT_GT(expanded_area, original_area);
+    // Original: base=2, height=2, area=2.0
+    // Expanded: sides shift by 0.5 (~3.75) + rounded corners add significant area (~2.25)
+    // Total ≈ 6.0 due to 3 rounded corners (arc segments with r=0.5 at sharp angles)
+    EXPECT_NEAR(original_area, 2.0, epsilon);
+    EXPECT_NEAR(expanded_area, 6.0, 0.5);
+  }
+
+  {  // empty polygon
+    Polygon2d empty_poly;
+    const auto result = expandPolygonUniform(empty_poly, 1.0);
+    // Should handle gracefully - returns empty or original
+    EXPECT_EQ(result.outer().size(), empty_poly.outer().size());
+  }
+
+  {  // Test offset == 0.0 returns corrected polygon
+    // Regression test: ensure boost::geometry::correct() is called for offset=0
+    Polygon2d box_poly{{{-1.0, -1.0}, {-1.0, 1.0}, {1.0, 1.0}, {1.0, -1.0}, {-1.0, -1.0}}};
+    const auto result_poly = expandPolygonUniform(box_poly, 0.0);
+
+    // Should return a valid, corrected polygon with same area
+    EXPECT_EQ(result_poly.outer().size(), 5); // Result must have same amount of vertices
+    const double original_area = std::abs(boost::geometry::area(box_poly));
+    const double result_area = std::abs(boost::geometry::area(result_poly));
+    EXPECT_NEAR(result_area, original_area, epsilon);
+
+    // Polygon should be properly closed and oriented
+    EXPECT_TRUE(boost::geometry::is_valid(result_poly));
+  }
+
+  {  // Test large negative offset returns corrected original when completely shrunk
+    // Regression test: buffered_polygons.empty() case should return corrected polygon
+    Polygon2d small_box{{{-0.5, -0.5}, {-0.5, 0.5}, {0.5, 0.5}, {0.5, -0.5}, {-0.5, -0.5}}};
+    // Offset larger than polygon size - should shrink to nothing, return corrected original
+    const auto result_poly = expandPolygonUniform(small_box, -2.0);
+
+    // Should return a valid corrected polygon (the original, since shrinking failed)
+    EXPECT_EQ(result_poly.outer().size(), 5); // Result must have same amount of vertices
+    const double original_area = std::abs(boost::geometry::area(small_box));
+    const double result_area = std::abs(boost::geometry::area(result_poly));
+    EXPECT_NEAR(result_area, original_area, epsilon);
+
+    // Polygon should be properly corrected
+    EXPECT_TRUE(boost::geometry::is_valid(result_poly));
+  }
+}

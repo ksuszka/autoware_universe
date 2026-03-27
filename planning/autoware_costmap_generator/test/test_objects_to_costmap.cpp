@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "objects_to_costmap_test_accessor.hpp"
+
 #include <autoware/costmap_generator/utils/objects_to_costmap.hpp>
 #include <autoware_utils/geometry/geometry.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -365,5 +367,249 @@ TEST_F(ObjectsToCostMapTest, TestMakeCostmapFromObjects_PolygonTypeYaw45Rotation
   grid_map::Index outside_index;
   ASSERT_TRUE(gridmap.getIndex(grid_map::Position(2.0, 0.0), outside_index));
   EXPECT_DOUBLE_EQ(objects_costmap(outside_index.x(), outside_index.y()), 0.0);
+}
+
+TEST_F(ObjectsToCostMapTest, TestMakePolygonFromObjectConvexHull_WithExpansion)
+{
+  // Test polygon object with expansion using expandPolygonUniform
+  geometry_msgs::msg::Pose pose;
+  pose.position.x = 0.0;
+  pose.position.y = 0.0;
+  pose.position.z = 0.0;
+  tf2::Quaternion q;
+  q.setRPY(0.0, 0.0, 0.0);
+  pose.orientation = tf2::toMsg(q);
+
+  geometry_msgs::msg::Vector3 dimension;
+  dimension.x = 2.0;
+  dimension.y = 2.0;
+  dimension.z = 1.0;
+
+  auto object = get_polygon_object_local_footprint(pose, dimension);
+
+  std_msgs::msg::Header header;
+  header.frame_id = "map";
+
+  ObjectsToCostmap obj2costmap;
+  autoware::costmap_generator::test::ObjectsToCostmapTestAccessor accessor(obj2costmap);
+
+  // Test with no expansion
+  const double no_expansion = 0.0;
+  auto polygon_no_expansion = accessor.makePolygonFromObjectConvexHull(header, object, no_expansion);
+
+  // Test with expansion
+  const double expansion_size = 0.5;
+  auto polygon_with_expansion =
+    accessor.makePolygonFromObjectConvexHull(header, object, expansion_size);
+
+  // The expanded polygon should have more or equal vertices (due to boost::buffer rounding)
+  EXPECT_GE(polygon_with_expansion.nVertices(), polygon_no_expansion.nVertices());
+
+  // Calculate max distance from center for both polygons
+  double max_dist_original = 0.0;
+  for (size_t i = 0; i < polygon_no_expansion.nVertices(); ++i) {
+    const auto & vertex = polygon_no_expansion.getVertex(i);
+    double dist = std::hypot(vertex.x(), vertex.y());
+    max_dist_original = std::max(max_dist_original, dist);
+  }
+
+  double max_dist_expanded = 0.0;
+  for (size_t i = 0; i < polygon_with_expansion.nVertices(); ++i) {
+    const auto & vertex = polygon_with_expansion.getVertex(i);
+    double dist = std::hypot(vertex.x(), vertex.y());
+    max_dist_expanded = std::max(max_dist_expanded, dist);
+  }
+
+  // Expanded polygon should have vertices further from center
+  EXPECT_GT(max_dist_expanded, max_dist_original);
+  EXPECT_NEAR(max_dist_expanded, max_dist_original + expansion_size, 0.0001);
+}
+
+TEST_F(ObjectsToCostMapTest, TestMakePolygonFromObjectConvexHull_NoExpansionWhenZero)
+{
+  geometry_msgs::msg::Pose pose;
+  pose.position.x = 5.0;
+  pose.position.y = 5.0;
+  pose.position.z = 0.0;
+  tf2::Quaternion q;
+  q.setRPY(0.0, 0.0, M_PI_4);
+  pose.orientation = tf2::toMsg(q);
+
+  geometry_msgs::msg::Vector3 dimension;
+  dimension.x = 4.0;
+  dimension.y = 2.0;
+  dimension.z = 1.5;
+
+  auto object = get_polygon_object_local_footprint(pose, dimension);
+
+  std_msgs::msg::Header header;
+  header.frame_id = "map";
+
+  ObjectsToCostmap obj2costmap;
+  autoware::costmap_generator::test::ObjectsToCostmapTestAccessor accessor(obj2costmap);
+
+  // Test that zero expansion doesn't modify the polygon
+  const double zero_expansion = 0.0;
+  auto polygon = accessor.makePolygonFromObjectConvexHull(header, object, zero_expansion);
+
+  // Should have 5 vertices (corners of the footprint)
+  EXPECT_EQ(polygon.nVertices(), 5);
+
+  // Check that polygon is centered around the object position
+  // Calculate centroid correctly by excluding the duplicate closing vertex if present
+  double sum_x = 0.0, sum_y = 0.0;
+  size_t count = polygon.nVertices();
+  
+  // Check if last vertex is duplicate of first (polygon closing point)
+  if (count > 1) {
+    const auto & first = polygon.getVertex(0);
+    const auto & last = polygon.getVertex(count - 1);
+    const double epsilon = 1e-6;
+    if (std::abs(first.x() - last.x()) < epsilon && std::abs(first.y() - last.y()) < epsilon) {
+      count--;  // Exclude duplicate closing vertex from centroid calculation
+    }
+  }
+
+  for (size_t i = 0; i < count; ++i) {
+    const auto & vertex = polygon.getVertex(i);
+    sum_x += vertex.x();
+    sum_y += vertex.y();
+  }
+  double center_x = sum_x / count;
+  double center_y = sum_y / count;
+
+  EXPECT_NEAR(center_x, pose.position.x, 0.1);
+  EXPECT_NEAR(center_y, pose.position.y, 0.1);
+}
+
+TEST_F(ObjectsToCostMapTest, TestMakePolygonFromObjectConvexHull_LargeExpansion)
+{
+  geometry_msgs::msg::Pose pose;
+  pose.position.x = 0.0;
+  pose.position.y = 0.0;
+  pose.position.z = 0.0;
+  tf2::Quaternion q;
+  q.setRPY(0.0, 0.0, 0.0);
+  pose.orientation = tf2::toMsg(q);
+
+  geometry_msgs::msg::Vector3 dimension;
+  dimension.x = 1.0;
+  dimension.y = 1.0;
+  dimension.z = 1.0;
+
+  auto object = get_polygon_object_local_footprint(pose, dimension);
+
+  std_msgs::msg::Header header;
+  header.frame_id = "map";
+
+  ObjectsToCostmap obj2costmap;
+  autoware::costmap_generator::test::ObjectsToCostmapTestAccessor accessor(obj2costmap);
+
+  // Test with large expansion
+  const double large_expansion = 2.0;
+  auto polygon = accessor.makePolygonFromObjectConvexHull(header, object, large_expansion);
+
+  // Should create a valid polygon
+  EXPECT_GT(polygon.nVertices(), 0);
+
+  // Check that all vertices are at significant distance from origin
+  for (size_t i = 0; i < polygon.nVertices(); ++i) {
+    const auto & vertex = polygon.getVertex(i);
+    double dist = std::hypot(vertex.x(), vertex.y());
+    // With original size ~0.7 (half diagonal of 1x1) + 2.0 expansion
+    EXPECT_GT(dist, 1.0);
+  }
+}
+
+TEST_F(ObjectsToCostMapTest, TestExpandPolygonUniform_InMakeCostmapFromObjects)
+{
+  // Integration test: verify that expandPolygonUniform is used correctly in full pipeline
+  grid_map::GridMap gridmap = construct_gridmap();
+
+  geometry_msgs::msg::Pose pose;
+  pose.position.x = 0.0;
+  pose.position.y = 0.0;
+  pose.position.z = 0.0;
+  tf2::Quaternion q;
+  q.setRPY(0.0, 0.0, 0.0);
+  pose.orientation = tf2::toMsg(q);
+
+  geometry_msgs::msg::Vector3 dimension;
+  dimension.x = 2.0;
+  dimension.y = 2.0;
+  dimension.z = 1.0;
+
+  auto object = get_polygon_object_local_footprint(pose, dimension);
+
+  auto objects = std::make_shared<PredictedObjects>();
+  objects->header.frame_id = "map";
+  objects->objects.push_back(object);
+
+  ObjectsToCostmap obj2costmap;
+
+  // Test with expansion
+  const double expand_polygon_size = 2.0;
+  const int64_t size_of_expansion_kernel = 0;
+
+  const auto costmap_data =
+    obj2costmap.makeCostmapFromObjects(gridmap, expand_polygon_size, size_of_expansion_kernel, objects);
+
+  // Count non-zero cells
+  int occupied_cells = 0;
+  for (int i = 0; i < costmap_data.rows(); ++i) {
+    for (int j = 0; j < costmap_data.cols(); ++j) {
+      if (costmap_data(i, j) > 0.0) {
+        occupied_cells++;
+      }
+    }
+  }
+
+  // With expansion, should have more occupied cells than without
+  EXPECT_GT(occupied_cells, 16);
+  EXPECT_LT(occupied_cells, 30);  // Sanity check
+}
+
+TEST_F(ObjectsToCostMapTest, TestMakePolygonFromObjectConvexHull_NoExpansion_NotEmpty)
+{
+  // Regression test: ensure polygon with expand_polygon_size=0 is not empty
+  // Tests the fix for boost::geometry::correct() being called when offset=0
+  geometry_msgs::msg::Pose pose;
+  pose.position.x = 5.0;
+  pose.position.y = 5.0;
+  pose.position.z = 0.0;
+  tf2::Quaternion q;
+  q.setRPY(0.0, 0.0, 0.0);
+  pose.orientation = tf2::toMsg(q);
+
+  geometry_msgs::msg::Vector3 dimension;
+  dimension.x = 2.0;
+  dimension.y = 2.0;
+  dimension.z = 1.0;
+
+  auto object = get_polygon_object_local_footprint(pose, dimension);
+
+  std_msgs::msg::Header header;
+  header.frame_id = "map";
+
+  ObjectsToCostmap obj2costmap;
+  autoware::costmap_generator::test::ObjectsToCostmapTestAccessor accessor(obj2costmap);
+
+  // Test with NO expansion (expand_polygon_size = 0.0)
+  const double no_expansion = 0.0;
+  auto polygon = accessor.makePolygonFromObjectConvexHull(header, object, no_expansion);
+
+  // Polygon should not be empty - it should have vertices from the footprint
+  EXPECT_EQ(polygon.nVertices(), 5);  // exact 5 vertices for valid polygon
+
+  // Verify polygon is properly formed and positioned around the object
+
+  for (size_t i = 0; i < polygon.nVertices(); ++i) {
+    const auto & vertex = polygon.getVertex(i);
+    double dist_to_center = std::hypot(vertex.x() - pose.position.x, vertex.y() - pose.position.y);
+    // Vertices should be exactly sqrt(2) from the center.
+    if (dist_to_center < 2.0) {
+      EXPECT_NEAR(dist_to_center, std::sqrt(2), 1e-6);
+    }
+  }
 }
 }  // namespace autoware::costmap_generator
