@@ -58,26 +58,35 @@ void LoggingNode::on_create(DiagGraph::ConstSharedPtr graph)
 
 void LoggingNode::on_timer()
 {
-  static const auto prefix_message = "The target mode is not available for the following reasons:";
-  if (root_unit_ && root_unit_->level() != DiagUnit::DiagnosticStatus::OK) {
-    dump_text_.str("");
-    dump_text_.clear(std::stringstream::goodbit);
-    dump_unit(root_unit_, 0, "");
+  auto log_message = [this](std::string & dump_str) {
+    auto logger = get_logger();
 
-    if (enable_terminal_log_ && dump_text_.str() != latest_log_text_) {
-      RCLCPP_WARN_STREAM(get_logger(), prefix_message << std::endl << dump_text_.str());
-      latest_log_text_ = dump_text_.str();
+    if (dump_str.empty()) {
+      RCLCPP_INFO_STREAM(logger, "The target mode (" << root_path_ << ") changed to available.");
+    } else {
+      RCLCPP_WARN_STREAM(
+        logger, "The target mode (" << root_path_
+                                    << ") is not available for the following reasons:" << std::endl
+                                    << dump_str);
     }
+  };
 
-    autoware_internal_debug_msgs::msg::StringStamped message;
-    message.stamp = now();
-    message.data = dump_text_.str();
-    pub_error_graph_text_->publish(message);
-  } else {
-    autoware_internal_debug_msgs::msg::StringStamped message;
-    message.stamp = now();
-    pub_error_graph_text_->publish(message);
+  dump_text_.str("");
+  dump_text_.clear(std::stringstream::goodbit);
+  if (root_unit_ && root_unit_->level() != DiagUnit::DiagnosticStatus::OK) {
+    dump_unit(root_unit_, 0, "");
   }
+
+  auto dump_str = dump_text_.str();
+  if (enable_terminal_log_ && dump_str != latest_log_text_) {
+    log_message(dump_str);
+    latest_log_text_ = dump_str;
+  }
+
+  autoware_internal_debug_msgs::msg::StringStamped message;
+  message.stamp = now();
+  message.data = dump_str;
+  pub_error_graph_text_->publish(message);
 }
 
 void LoggingNode::dump_unit(DiagUnit * unit, int depth, const std::string & indent)

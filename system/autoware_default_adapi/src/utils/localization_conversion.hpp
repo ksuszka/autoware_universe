@@ -23,6 +23,8 @@
 namespace autoware::default_adapi::localization_conversion
 {
 
+static constexpr auto remote_service_call_timeout = 5.0;
+
 using ExternalInitializeRequest =
   autoware_adapi_v1_msgs::srv::InitializeLocalization::Request::SharedPtr;
 using InternalInitializeRequest =
@@ -36,7 +38,7 @@ ExternalResponse convert_response(const InternalResponse & internal);
 template <class ClientT, class RequestT>
 ExternalResponse convert_call(ClientT & client, RequestT & req)
 {
-  return convert_response(client->call(convert_request(req))->status);
+  return convert_response(client->call(convert_request(req), remote_service_call_timeout)->status);
 }
 
 }  // namespace autoware::default_adapi::localization_conversion

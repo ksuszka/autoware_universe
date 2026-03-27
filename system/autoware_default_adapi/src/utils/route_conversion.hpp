@@ -31,6 +31,8 @@
 namespace autoware::default_adapi::conversion
 {
 
+static constexpr auto remote_service_call_timeout = 5.0;
+
 using ExternalRoute = autoware_adapi_v1_msgs::msg::Route;
 using InternalRoute = autoware_planning_msgs::msg::LaneletRoute;
 ExternalRoute create_empty_route(const rclcpp::Time & stamp);
@@ -59,7 +61,7 @@ ExternalResponse convert_response(const InternalResponse & internal);
 template <class ClientT, class RequestT>
 ExternalResponse convert_call(ClientT & client, RequestT & req)
 {
-  return convert_response(client->call(convert_request(req))->status);
+  return convert_response(client->call(convert_request(req), remote_service_call_timeout)->status);
 }
 
 }  // namespace autoware::default_adapi::conversion
