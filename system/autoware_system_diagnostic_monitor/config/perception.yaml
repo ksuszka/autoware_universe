@@ -4,6 +4,7 @@ units:
     list:
       - { type: link, link: /autoware/perception/topic_rate_check/objects }
       - { type: link, link: /autoware/perception/topic_rate_check/pointcloud }
+      - { type: link, link: /autoware/perception/topic_rate_check/as_near_field_object_detector }
 
   - path: /autoware/perception/topic_rate_check/objects
     type: diag
@@ -14,3 +15,9 @@ units:
     type: diag
     node: topic_state_monitor_obstacle_segmentation_pointcloud
     name: perception_topic_status
+
+  - path: /autoware/perception/topic_rate_check/as_near_field_object_detector
+    type: diag
+    node: topic_state_monitor_as_near_field_object_detector
+    name: perception_topic_status
+  

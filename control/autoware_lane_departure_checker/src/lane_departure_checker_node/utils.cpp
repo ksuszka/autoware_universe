@@ -129,7 +129,7 @@ TrajectoryPoints resampleTrajectory(const Trajectory & trajectory, const double 
 }
 
 std::vector<LinearRing2d> createVehicleFootprints(
-  const geometry_msgs::msg::PoseWithCovariance & covariance, [[maybe_unused]] const TrajectoryPoints & trajectory,
+  const geometry_msgs::msg::PoseWithCovariance & covariance, const TrajectoryPoints & trajectory,
   const autoware::vehicle_info_utils::VehicleInfo & vehicle_info,
   const double footprint_margin_scale)
 {
@@ -141,13 +141,10 @@ std::vector<LinearRing2d> createVehicleFootprints(
 
   // Create vehicle footprint on each TrajectoryPoint
   std::vector<LinearRing2d> vehicle_footprints;
-  // for (const auto & p : trajectory) {
-  //   vehicle_footprints.push_back(
-  //     transformVector(local_vehicle_footprint, autoware::universe_utils::pose2transform(p.pose)));
-  // }
-  //TODO: Temporary solution: https://autonomous-systems.atlassian.net/browse/SDP-5045
-  vehicle_footprints.push_back(autoware_utils::transform_vector(
-    local_vehicle_footprint, autoware_utils::pose2transform(covariance.pose)));
+  for (const auto & p : trajectory) {
+    vehicle_footprints.push_back(autoware_utils::transform_vector(
+      local_vehicle_footprint, autoware_utils::pose2transform(p.pose)));
+  }
   return vehicle_footprints;
 }
 

@@ -38,6 +38,9 @@
   <arg name="predicted_path_checker_param_path"/>
   <arg name="collision_detector_param_path"/>
 
+  <!-- AS-Drive AEB input imu topic -->
+  <arg name="aeb_imu_input_topic" default="/sensing/imu/imu_data"/>
+
   <!-- component -->
   <arg name="use_intra_process" default="false" description="use ROS 2 component container communication"/>
   <arg name="use_multithread" default="true" description="use multithread"/>
@@ -76,6 +79,7 @@
           <remap from="input/external_emergency_stop_heartbeat" to="/external/selected/heartbeat"/>
           <remap from="input/gate_mode" to="/control/gate_mode_cmd"/>
           <remap from="input/emergency/control_cmd" to="/system/emergency/control_cmd"/>
+          <remap from="input/emergency/turn_indicators_cmd" to="/system/emergency/turn_indicators_cmd"/>
           <remap from="input/emergency/hazard_lights_cmd" to="/system/emergency/hazard_lights_cmd"/>
           <remap from="input/emergency/gear_cmd" to="/system/emergency/gear_cmd"/>
           <remap from="input/mrm_state" to="/system/fail_safe/mrm_state"/>
@@ -218,7 +222,7 @@
           <composable_node pkg="autoware_autonomous_emergency_braking" plugin="autoware::motion::control::autonomous_emergency_braking::AEB" name="autonomous_emergency_braking">
             <remap from="~/input/pointcloud" to="/perception/obstacle_segmentation/pointcloud"/>
             <remap from="~/input/velocity" to="/vehicle/status/velocity_status"/>
-            <remap from="~/input/imu" to="/sensing/imu/imu_data"/>
+            <remap from="~/input/imu" to="$(var aeb_imu_input_topic)"/>
             <remap from="~/input/objects" to="/perception/object_recognition/objects"/>
             <remap from="~/input/predicted_trajectory" to="/control/trajectory_follower/lateral/predicted_trajectory"/>
             <param from="$(var aeb_param_path)"/>

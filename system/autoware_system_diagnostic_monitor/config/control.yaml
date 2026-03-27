@@ -66,3 +66,18 @@ units:
     type: diag
     node: external_cmd_converter
     name: remote_control_topic_status
+
+  - path: /autoware/control/control_validator/max_distance_deviation
+    type: diag
+    node: control_validator
+    name: control_validation_max_distance_deviation
+
+  - path: /autoware/control/control_validator/over_velocity
+    type: diag
+    node: control_validator
+    name: control_validation_over_velocity
+
+  - path: /autoware/control/control_validator/rolling_back
+    type: diag
+    node: control_validator
+    name: control_validation_rolling_back

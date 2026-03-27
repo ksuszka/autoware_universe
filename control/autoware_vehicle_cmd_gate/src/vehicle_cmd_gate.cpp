@@ -312,14 +312,14 @@ bool VehicleCmdGate::isDataReady()
   // emergency state must be received before running
   if (use_emergency_handling_) {
     if (!emergency_state_heartbeat_received_time_) {
-      RCLCPP_WARN(get_logger(), "emergency_state_heartbeat_received_time_ is false");
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, "emergency_state_heartbeat_received_time_ is false");
       return false;
     }
   }
 
   if (check_external_emergency_heartbeat_) {
     if (!external_emergency_stop_heartbeat_received_time_) {
-      RCLCPP_WARN(get_logger(), "external_emergency_stop_heartbeat_received_time_ is false");
+      RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 5000, "external_emergency_stop_heartbeat_received_time_ is false");
       return false;
     }
   }
@@ -406,6 +406,10 @@ void VehicleCmdGate::onTimer()
   if (msg_emergency_command_hazard_light)
     emergency_commands_.hazard_light = *msg_emergency_command_hazard_light;
 
+  const auto msg_emergency_command_turn_indicator = emergency_turn_indicator_cmd_sub_.take_data();
+  if (msg_emergency_command_turn_indicator)
+    emergency_commands_.turn_indicator = *msg_emergency_command_turn_indicator;
+
   const auto msg_emergency_command_gear = emergency_gear_cmd_sub_.take_data();
   if (msg_emergency_command_gear) emergency_commands_.gear = *msg_emergency_command_gear;
 
@@ -489,7 +493,9 @@ void VehicleCmdGate::onTimer()
       getContinuousTopic(prev_turn_indicator_, turn_indicator, "TurnIndicatorsCommand");
     turn_indicator_cmd_pub_->publish(*prev_turn_indicator_);
   } else {
-    if (msg_auto_command_turn_indicator || msg_remote_command_turn_indicator) {
+    if (
+      msg_auto_command_turn_indicator || msg_remote_command_turn_indicator ||
+      msg_emergency_command_turn_indicator) {
       prev_turn_indicator_ = std::make_shared<TurnIndicatorsCommand>(turn_indicator);
     }
     turn_indicator_cmd_pub_->publish(turn_indicator);
