@@ -268,7 +268,7 @@ protected:
     tracker_ignore_.BICYCLE = false;
     tracker_ignore_.PEDESTRIAN = false;
 
-    shape_estimator_ = std::make_shared<autoware::shape_estimation::ShapeEstimator>(true, true);
+    shape_estimator_ = autoware::shape_estimation::ShapeEstimator(false, true);
     cluster_ = std::make_shared<autoware::euclidean_cluster::VoxelGridBasedEuclideanCluster>(
       false, 1, 1000000000, 0.3, 0.2, 1);
 
@@ -445,7 +445,7 @@ protected:
       feature_object.feature.cluster = cluster_msg;
 
       // Estimate shape
-      shape_estimator_->estimateShapeAndPose(
+      shape_estimator_.estimateShapeAndPose(
         Label::UNKNOWN, cluster, boost::none, boost::none, boost::none, feature_object.object.shape,
         feature_object.object.kinematics.pose_with_covariance.pose);
 
@@ -458,7 +458,7 @@ protected:
   // Test parameters
   std::map<uint8_t, int> max_search_distance_map_;
   detection_by_tracker::utils::TrackerIgnoreLabel tracker_ignore_;
-  std::shared_ptr<autoware::shape_estimation::ShapeEstimator> shape_estimator_;
+  autoware::shape_estimation::ShapeEstimator shape_estimator_{false, true};
   std::shared_ptr<autoware::euclidean_cluster::EuclideanClusterInterface> cluster_;
   double extend_scale_;
   double buffer_distance_;

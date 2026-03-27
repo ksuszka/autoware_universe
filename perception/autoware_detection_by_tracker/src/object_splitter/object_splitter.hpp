@@ -91,7 +91,7 @@ public:
   explicit ObjectSplitter(
     const std::map<uint8_t, int> & max_search_distance_map,
     const detection_by_tracker::utils::TrackerIgnoreLabel & tracker_ignore,
-    const std::shared_ptr<autoware::shape_estimation::ShapeEstimator> & shape_estimator,
+    autoware::shape_estimation::ShapeEstimator shape_estimator,
     const std::shared_ptr<autoware::euclidean_cluster::EuclideanClusterInterface> & cluster,
     const double extend_scale, const double buffer_distance,
     const double existence_probability_threshold, const double existence_probability_modifier,
@@ -260,7 +260,7 @@ private:
   std::map<object_recognition_utils::ObjectClassification::_label_type, int>
     max_search_distance_map_;
   detection_by_tracker::utils::TrackerIgnoreLabel tracker_ignore_;
-  std::shared_ptr<autoware::shape_estimation::ShapeEstimator> shape_estimator_;
+  autoware::shape_estimation::ShapeEstimator shape_estimator_;
   std::shared_ptr<autoware::euclidean_cluster::EuclideanClusterInterface> cluster_;
   double extend_scale_;
   double buffer_distance_;

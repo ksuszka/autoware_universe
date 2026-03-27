@@ -49,14 +49,14 @@ namespace bg = boost::geometry;
 ObjectSplitter::ObjectSplitter(
   const std::map<uint8_t, int> & max_search_distance_map,
   const detection_by_tracker::utils::TrackerIgnoreLabel & tracker_ignore,
-  const std::shared_ptr<autoware::shape_estimation::ShapeEstimator> & shape_estimator,
+  autoware::shape_estimation::ShapeEstimator shape_estimator,
   const std::shared_ptr<autoware::euclidean_cluster::EuclideanClusterInterface> & cluster,
   const double extend_scale, const double buffer_distance,
   const double existence_probability_threshold, const double existence_probability_modifier,
   const rclcpp::Logger & logger)
 : max_search_distance_map_(max_search_distance_map),
   tracker_ignore_(tracker_ignore),
-  shape_estimator_(shape_estimator),
+  shape_estimator_(std::move(shape_estimator)),
   cluster_(cluster),
   extend_scale_(extend_scale),
   buffer_distance_(buffer_distance),
@@ -162,7 +162,7 @@ bool ObjectSplitter::updateTrackedObject(
   const auto shape_size_info = utils::getReferenceShapeSizeInfo(label, tracked_object.shape);
 
   // Try to estimate shape and pose from point cloud
-  if (!shape_estimator_->estimateShapeAndPose(
+  if (!shape_estimator_.estimateShapeAndPose(
         label, pcl_cluster, yaw_info, shape_size_info, boost::none, tracked_object.shape,
         tracked_object.kinematics.pose_with_covariance.pose)) {
     RCLCPP_DEBUG(logger_, "Failed to estimate shape for object with label: %d", label);
@@ -294,7 +294,7 @@ DetectedObjects ObjectSplitter::clusterObjectsToDetectedObjects(
     DetectedObject out_object;
 
     // Estimate shape from points
-    if (!shape_estimator_->estimateShapeAndPose(
+    if (!shape_estimator_.estimateShapeAndPose(
           Label::UNKNOWN, divided_cluster, boost::none, boost::none, boost::none, out_object.shape,
           out_object.kinematics.pose_with_covariance.pose)) {
       RCLCPP_DEBUG(logger_, "Failed to estimate shape for UNKNOWN cluster");

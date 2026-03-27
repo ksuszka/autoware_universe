@@ -21,6 +21,7 @@
 #include <NvInferPlugin.h>
 #include <NvInferRuntime.h>
 #include <dlfcn.h>
+#include <fmt/format.h>
 
 #include <cmath>
 #include <fstream>
@@ -95,10 +96,13 @@ TrtCommon::TrtCommon(
 #endif  // ENABLE_ASAN
     void * handle = dlopen(plugin_path.c_str(), flags);
     if (!handle) {
-      logger_->log(nvinfer1::ILogger::Severity::kERROR, "Could not load plugin library");
+      logger_->log(
+        nvinfer1::ILogger::Severity::kERROR,
+        fmt::format("Could not load plugin library {}: {}", plugin_path, dlerror()).c_str());
     } else {
       logger_->log(
-        nvinfer1::ILogger::Severity::kINFO, "Loaded plugin library: %s", plugin_path.c_str());
+        nvinfer1::ILogger::Severity::kINFO,
+        fmt::format("Loaded plugin library: {}", plugin_path).c_str());
     }
   }
   runtime_ = TrtUniquePtr<nvinfer1::IRuntime>(nvinfer1::createInferRuntime(*logger_));
@@ -108,7 +112,8 @@ TrtCommon::TrtCommon(
   initLibNvInferPlugins(&*logger_, "");
 
   if (!initialize()) {
-    throw std::runtime_error("Failed to initialize TensorRT");
+    throw std::runtime_error(fmt::format(
+      "Failed to initialize TensorRT for plugin: {}", trt_config_.get()->onnx_path.string()));
   }
 }
 
@@ -127,8 +132,9 @@ bool TrtCommon::setup(ProfileDimsPtr profile_dims, NetworkIOPtr network_io)
         profile_dim.tensor_name = getIOTensorName(profile_dim.tensor_index);
       }
       logger_->log(
-        nvinfer1::ILogger::Severity::kINFO, "Setting optimization profile for tensor: %s",
-        profile_dim.toString().c_str());
+        nvinfer1::ILogger::Severity::kINFO,
+        "Setting optimization profile for tensor: %s, engine: %s", profile_dim.toString().c_str(),
+        trt_config_->engine_path.c_str());
       profile->setDimensions(
         profile_dim.tensor_name.c_str(), nvinfer1::OptProfileSelector::kMIN, profile_dim.min_dims);
       profile->setDimensions(
@@ -140,14 +146,23 @@ bool TrtCommon::setup(ProfileDimsPtr profile_dims, NetworkIOPtr network_io)
   }
 
   auto build_engine_with_log = [this]() -> bool {
-    logger_->log(nvinfer1::ILogger::Severity::kINFO, "Starting to build engine");
+    logger_->log(
+      nvinfer1::ILogger::Severity::kINFO, "Starting to build engine {} from ONNX",
+      trt_config_->onnx_path.c_str());
     auto log_thread = logger_->log_throttle(
       nvinfer1::ILogger::Severity::kINFO,
-      "Applying optimizations and building TensorRT CUDA engine. Please wait for a few minutes...",
+      fmt::format(
+        "Applying optimizations and building TensorRT CUDA engine {}. Please wait for a few "
+        "minutes...",
+        trt_config_->engine_path.c_str())
+        .c_str(),
       5);
+
     auto success = buildEngineFromOnnx();
     logger_->stop_throttle(log_thread);
-    logger_->log(nvinfer1::ILogger::Severity::kINFO, "Engine build completed");
+    logger_->log(
+      nvinfer1::ILogger::Severity::kINFO,
+      fmt::format("Engine {} build completed", trt_config_->engine_path.c_str()).c_str());
     return success;
   };
 
@@ -157,7 +172,10 @@ bool TrtCommon::setup(ProfileDimsPtr profile_dims, NetworkIOPtr network_io)
     if (!validateEngine()) {
       logger_->log(
         nvinfer1::ILogger::Severity::kWARNING,
-        "Validation failed for the existing engine file. Rebuilding");
+        fmt::format(
+          "Validation failed for the existing engine file {}. Rebuilding",
+          trt_config_->engine_path.c_str())
+          .c_str());
       // Rebuild engine if version mismatch occurred
       if (!build_engine_with_log()) {
         return false;
@@ -170,7 +188,10 @@ bool TrtCommon::setup(ProfileDimsPtr profile_dims, NetworkIOPtr network_io)
     if (!validateNetworkIO() || !validateProfileDims()) {
       logger_->log(
         nvinfer1::ILogger::Severity::kWARNING,
-        "Network validation failed for loaded engine from file. Rebuilding engine");
+        fmt::format(
+          "Network validation failed for loaded engine {} from file. Rebuilding engine",
+          trt_config_->engine_path.c_str())
+          .c_str());
       // Rebuild engine if the tensor shapes or optimization profile mismatch
       if (!build_engine_with_log()) {
         return false;
@@ -192,7 +213,9 @@ bool TrtCommon::setup(ProfileDimsPtr profile_dims, NetworkIOPtr network_io)
     return false;
   }
 
-  logger_->log(nvinfer1::ILogger::Severity::kINFO, "Engine setup completed");
+  logger_->log(
+    nvinfer1::ILogger::Severity::kINFO, "Engine %s setup completed",
+    trt_config_->engine_path.c_str());
   return true;
 }
 

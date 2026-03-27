@@ -45,6 +45,7 @@ private:
   int max_depth_;
   std::string root_path_;
   std::ostringstream dump_text_;
+  std::string latest_log_text_;
   bool enable_terminal_log_;
 };
 

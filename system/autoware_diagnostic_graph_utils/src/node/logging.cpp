@@ -64,8 +64,9 @@ void LoggingNode::on_timer()
     dump_text_.clear(std::stringstream::goodbit);
     dump_unit(root_unit_, 0, "");
 
-    if (enable_terminal_log_) {
+    if (enable_terminal_log_ && dump_text_.str() != latest_log_text_) {
       RCLCPP_WARN_STREAM(get_logger(), prefix_message << std::endl << dump_text_.str());
+      latest_log_text_ = dump_text_.str();
     }
 
     autoware_internal_debug_msgs::msg::StringStamped message;

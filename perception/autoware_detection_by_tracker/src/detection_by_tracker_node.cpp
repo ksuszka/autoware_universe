@@ -93,7 +93,8 @@ DetectionByTracker::DetectionByTracker(const rclcpp::NodeOptions & node_options)
     existence_probability_modifier_ =
       declare_parameter<double>("existence_probability_modifier", 0.5);
     object_splitter_ = std::make_shared<ObjectSplitter>(
-      max_search_distance_for_divider_, tracker_ignore_, shape_estimator_, cluster_, extend_scale_,
+      max_search_distance_for_divider_, tracker_ignore_,
+      autoware::shape_estimation::ShapeEstimator{false, true}, cluster_, extend_scale_,
       buffer_distance_, existence_probability_threshold_, existence_probability_modifier_,
       this->get_logger());
   }
