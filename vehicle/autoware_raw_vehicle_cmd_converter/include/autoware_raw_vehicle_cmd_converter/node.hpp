@@ -93,7 +93,7 @@ public:
   autoware_utils::InterProcessPollingSubscriber<AccelWithCovarianceStamped> sub_accel_{
     this, "~/input/accel"};
   autoware_utils::InterProcessPollingSubscriber<OperationModeState> sub_operation_mode_{
-    this, "~/input/operation_mode_state"};
+    this, "~/input/operation_mode_state", rclcpp::QoS{1}.transient_local()};
   // control_horizon is an experimental topic, but vehicle_adaptor uses it to improve performance,
   autoware_utils::InterProcessPollingSubscriber<ControlHorizon> sub_control_horizon_{
     this, "~/input/control_horizon"};

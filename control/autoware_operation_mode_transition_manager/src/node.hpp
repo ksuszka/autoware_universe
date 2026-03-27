@@ -58,7 +58,7 @@ private:
   autoware_utils::InterProcessPollingSubscriber<ControlModeReport> sub_control_mode_report_{
     this, "control_mode_report"};
   autoware_utils::InterProcessPollingSubscriber<OperationModeState> sub_gate_operation_mode_{
-    this, "gate_operation_mode"};
+    this, "gate_operation_mode", rclcpp::QoS{1}.transient_local()};
   rclcpp::Client<ControlModeCommand>::SharedPtr cli_control_mode_;
   rclcpp::Publisher<ModeChangeBase::DebugInfo>::SharedPtr pub_debug_info_;
   rclcpp::TimerBase::SharedPtr timer_;

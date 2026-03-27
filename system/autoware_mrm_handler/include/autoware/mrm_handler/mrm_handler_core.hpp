@@ -87,7 +87,8 @@ private:
   autoware_utils::InterProcessPollingSubscriber<tier4_system_msgs::msg::MrmBehaviorStatus>
     sub_mrm_emergency_stop_status_{this, "~/input/mrm/emergency_stop/status"};
   autoware_utils::InterProcessPollingSubscriber<autoware_adapi_v1_msgs::msg::OperationModeState>
-    sub_operation_mode_state_{this, "~/input/api/operation_mode/state"};
+    sub_operation_mode_state_{
+      this, "~/input/api/operation_mode/state", rclcpp::QoS{1}.transient_local()};
   autoware_utils::InterProcessPollingSubscriber<autoware_vehicle_msgs::msg::GearCommand>
     sub_gear_cmd_{this, "~/input/gear"};
 
