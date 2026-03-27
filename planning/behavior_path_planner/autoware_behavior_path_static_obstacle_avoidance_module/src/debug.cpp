@@ -146,9 +146,12 @@ MarkerArray createObjectInfoMarkerArray(const ObjectDataArray & objects, std::st
     marker.id = uuidToInt32(object.object.object_id);
     marker.pose = object.getPose();
     std::ostringstream string_stream;
+    double lateral = object.overhang_points.empty() ? NAN : object.overhang_points.front().first;
     string_stream << std::fixed << std::setprecision(2) << std::boolalpha;
     string_stream << "ratio:" << object.shiftable_ratio << " [-]\n"
-                  << "lateral:" << object.to_centerline << " [m]\n"
+                  << "to centerline:" << object.to_centerline << " [m]\n"
+                  << "lateral:" << lateral << " [m]\n"
+                  << "longitudinal:" << object.longitudinal << " [m]\n"
                   << "clip:" << object.is_clip_target << " [-]\n"
                   << "necessity:" << object.avoid_required << " [-]\n"
                   << "stoppable:" << object.is_stoppable << " [-]\n"

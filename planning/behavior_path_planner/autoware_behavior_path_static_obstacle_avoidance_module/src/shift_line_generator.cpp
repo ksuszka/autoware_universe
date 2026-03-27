@@ -170,11 +170,12 @@ AvoidOutlines ShiftLineGenerator::generateAvoidOutline(
     }
 
     // the avoidance path is already approved
-    const auto is_approved =
-      (helper_->getShift(object.getPosition()) > 0.0 && is_object_on_right) ||
-      (helper_->getShift(object.getPosition()) < 0.0 && !is_object_on_right);
-    if (is_approved) {
-      return std::make_pair(desire_shift_length, avoidance_distance);
+    const double approved_shift = helper_->getShift(object.getPosition());
+    if (approved_shift > 0.0 && is_object_on_right) {
+      return std::make_pair(std::min(std::abs(desire_shift_length), approved_shift), avoidance_distance);
+    }
+    if (approved_shift < 0.0 && !is_object_on_right) {
+      return std::make_pair(std::max(-std::abs(desire_shift_length), approved_shift), avoidance_distance);
     }
 
     // prepare distance is not enough. unavoidable.
@@ -202,7 +203,7 @@ AvoidOutlines ShiftLineGenerator::generateAvoidOutline(
     // avoidance distance is not enough. unavoidable.
     if (!isBestEffort(parameters_->policy_deceleration)) {
       if (avoidance_distance < helper_->getMinAvoidanceDistance(avoiding_shift) + LON_DIST_BUFFER) {
-        object.info = ObjectInfo::INSUFFICIENT_LONGITUDINAL_DISTANCE_BY_JERK_LIMIT;
+        object.info = ObjectInfo::INSUFFICIENT_LONGITUDINAL_DISTANCE_BY_SHIFT;
         return std::nullopt;
       } else {
         object.info = ObjectInfo::NEED_DECELERATION;
@@ -222,14 +223,7 @@ AvoidOutlines ShiftLineGenerator::generateAvoidOutline(
     const auto feasible_shift_length =
       desire_shift_length > 0.0 ? feasible_relative_shift_length + current_ego_shift
                                 : -1.0 * feasible_relative_shift_length + current_ego_shift;
-
-    if (
-      avoidance_distance <
-      helper_->getMinAvoidanceDistance(feasible_shift_length) + LON_DIST_BUFFER) {
-      object.info = ObjectInfo::INSUFFICIENT_LONGITUDINAL_DISTANCE_BY_JERK_LIMIT;
-      return std::nullopt;
-    }
-
+                                
     const double LAT_DIST_BUFFER = desire_shift_length > 0.0 ? 1e-3 : -1e-3;
 
     const auto lateral_hard_margin = object.is_parked
@@ -239,15 +233,34 @@ AvoidOutlines ShiftLineGenerator::generateAvoidOutline(
       std::abs(feasible_shift_length - object.overhang_points.front().first) - LAT_DIST_BUFFER <
       0.5 * data_->parameters.vehicle_width + lateral_hard_margin;
     if (infeasible) {
-      RCLCPP_DEBUG(rclcpp::get_logger(""), "feasible shift length is not enough to avoid. ");
-      object.info = ObjectInfo::NEED_DECELERATION;
+      object.info = ObjectInfo::INSUFFICIENT_LONGITUDINAL_DISTANCE_BY_INFEASIBLE_MARGIN;
       return std::nullopt;
     }
 
-    return std::make_pair(feasible_shift_length - LAT_DIST_BUFFER, avoidance_distance);
+    // calculate lateral jerk.
+    const auto feasible_jerk = autoware::motion_utils::calc_jerk_from_lat_lon_distance(
+      feasible_relative_shift_length, avoidance_distance, helper_->getAvoidanceEgoSpeed());
+
+    // relax lateral jerk limit. avoidable.
+    if (feasible_jerk < helper_->getLateralMaxJerkLimit()) {
+      return std::make_pair(feasible_shift_length, avoidance_distance);
+    }
+
+    if (
+      avoidance_distance <
+      helper_->getMinAvoidanceDistance(feasible_relative_shift_length) + LON_DIST_BUFFER) {
+      object.info = ObjectInfo::INSUFFICIENT_LONGITUDINAL_DISTANCE_BY_SHIFT;
+      return std::nullopt;
+    } else {
+      object.info = ObjectInfo::NEED_DECELERATION;
+      return std::nullopt;
+    }
   };
 
   const auto is_forward_object = [](const auto & object) { return object.longitudinal > 0.0; };
+  const auto extends_ahead_of_ego = [](const auto & object) {
+    return object.longitudinal + object.length > 0.0;
+  };
 
   const auto is_on_path = [this](const auto & object) {
     const auto [overhang, point] = object.overhang_points.front();
@@ -279,7 +292,11 @@ AvoidOutlines ShiftLineGenerator::generateAvoidOutline(
       if (o.avoid_required && is_forward_object(o) && is_on_path(o)) {
         break;
       } else {
-        unavoidable_objects.push_back(o);
+        if (extends_ahead_of_ego(o)) {
+          unavoidable_objects.push_back(o);
+          continue;
+        }
+        o.info = ObjectInfo::OUT_OF_TARGET_AREA;
         continue;
       }
     }
@@ -291,7 +308,11 @@ AvoidOutlines ShiftLineGenerator::generateAvoidOutline(
       if (o.avoid_required && is_forward_object(o) && is_on_path(o)) {
         break;
       } else {
-        unavoidable_objects.push_back(o);
+        if (extends_ahead_of_ego(o)) {
+          unavoidable_objects.push_back(o);
+          continue;
+        }
+        o.info = ObjectInfo::OUT_OF_TARGET_AREA;
         continue;
       }
     }
@@ -307,7 +328,11 @@ AvoidOutlines ShiftLineGenerator::generateAvoidOutline(
       if (o.avoid_required && is_forward_object(o) && is_on_path(o)) {
         break;
       } else {
-        unavoidable_objects.push_back(o);
+        if (extends_ahead_of_ego(o)) {
+          unavoidable_objects.push_back(o);
+          continue;
+        }
+        o.info = ObjectInfo::OUT_OF_TARGET_AREA;
         continue;
       }
     }

@@ -2171,6 +2171,10 @@ void filterTargetObjects(
         continue;
       }
       o.avoid_margin = filtering_utils::getAvoidMargin(o, planner_data, parameters);
+      if (filtering_utils::isNoNeedAvoidanceBehavior(o, parameters)) {
+        data.other_objects.push_back(o);
+        continue;
+      }
     } else if (filtering_utils::isVehicleTypeObject(o)) {
       // TARGET: CAR, TRUCK, BUS, TRAILER, MOTORCYCLE
 
