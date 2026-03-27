@@ -20,8 +20,11 @@
 #include "autoware/multi_object_tracker/tracker/tracker.hpp"
 
 #include <autoware/object_recognition_utils/object_recognition_utils.hpp>
+#include <autoware_utils/geometry/boost_geometry.hpp>
 
 #include <autoware_perception_msgs/msg/tracked_objects.hpp>
+
+#include <boost/geometry/algorithms/detail/intersects/interface.hpp>
 
 #include <iterator>
 #include <map>
@@ -36,6 +39,9 @@ namespace autoware::multi_object_tracker
 using autoware_utils::ScopedTimeTrack;
 using Label = autoware_perception_msgs::msg::ObjectClassification;
 using LabelType = autoware_perception_msgs::msg::ObjectClassification::_label_type;
+
+namespace bg = boost::geometry;
+using Box = bg::model::box<autoware_utils::Point2d>;
 
 TrackerProcessor::TrackerProcessor(
   const TrackerProcessorConfig & config, const AssociatorConfig & associator_config,
@@ -95,6 +101,52 @@ void TrackerProcessor::update(
   }
 }
 
+static std::vector<autoware_utils::Polygon2d> bufferPolygon2d(
+  const autoware_utils::Polygon2d & polygon, const double buffer_distance)
+{
+  bg::strategy::buffer::distance_symmetric<double> distance_strategy(buffer_distance);
+  bg::strategy::buffer::join_miter join_strategy;
+  bg::strategy::buffer::end_flat end_strategy;
+  bg::strategy::buffer::side_straight side_strategy;
+  bg::strategy::buffer::point_square point_strategy;
+  std::vector<autoware_utils::Polygon2d> buffered_polygons;
+  bg::buffer(
+    polygon, buffered_polygons, distance_strategy, side_strategy, join_strategy, end_strategy,
+    point_strategy);
+  return buffered_polygons;
+}
+
+bool TrackerProcessor::isLargerThanChild(
+  const types::DynamicObject & object)
+{
+  // Dimensions check
+  const auto & shape = object.shape;
+  if (shape.dimensions.z < config_.min_child_height) {
+    return false;
+  }
+
+  if (shape.type == autoware_perception_msgs::msg::Shape::BOUNDING_BOX) {
+    if (
+      shape.dimensions.x < config_.min_box_size_xy || shape.dimensions.y < config_.min_box_size_xy)
+      return false;
+
+  } else if (shape.type == autoware_perception_msgs::msg::Shape::CYLINDER) {
+    if (shape.dimensions.x < config_.min_cylinder_radius) {
+      return false;
+    }
+
+  } else if (shape.type == autoware_perception_msgs::msg::Shape::POLYGON) {
+    const auto polygon = autoware_utils::to_polygon2d(object.pose, shape);
+    if (bg::area(polygon) < config_.min_polygon_area) {
+      const auto shrunk_polygons = bufferPolygon2d(polygon, -config_.polygon_shrink_buffer);
+      if (shrunk_polygons.size() == 0) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 void TrackerProcessor::spawn(
   const types::DynamicObjectList & detected_objects,
   const std::unordered_map<int, int> & reverse_assignment)
@@ -123,6 +175,15 @@ void TrackerProcessor::spawn(
         new_object.channel_index, new_object.existence_probability);
     } else {
       tracker->initializeExistenceProbabilities(new_object.channel_index, 0.5);
+    }
+
+    if (
+      new_object.existence_probability >= config_.min_unknown_object_add_existence_prob ||
+      (object_recognition_utils::getHighestProbLabel(new_object.classification) ==
+          Label::UNKNOWN &&
+        isLargerThanChild(new_object))) {
+      // Add object immediately to the trackers
+      tracker->setTotalMeasurementCount(config_.confident_count_threshold.at(Label::UNKNOWN));
     }
 
     // Update the tracker with the new object
@@ -161,7 +222,7 @@ void TrackerProcessor::prune(const rclcpp::Time & time)
 
   // Check tracker lifetime: if the tracker is old, delete it
   removeOldTracker(time);
-  // Check tracker overlap: if the tracker is overlapped, delete the one with lower IOU
+  // Check tracker overlap
   removeOverlappedTracker(time);
 }
 
@@ -172,7 +233,14 @@ void TrackerProcessor::removeOldTracker(const rclcpp::Time & time)
 
   // Check elapsed time from last update
   for (auto itr = list_tracker_.begin(); itr != list_tracker_.end(); ++itr) {
-    const bool is_old = config_.tracker_lifetime < (*itr)->getElapsedTimeFromLastUpdate(time);
+    bool is_old = false;
+    auto lifetime = config_.tracker_lifetime;
+    if ((*itr)->getHighestProbLabel() == Label::UNKNOWN) {
+      // Limit the lifetime of UNKNOWN trackers to reduce the number of empty UNKNOWN trackers,
+      // as they are spawned faster with the isLargerThanChild check.
+      lifetime = config_.unknown_lifetime;
+    }
+    is_old = lifetime < (*itr)->getElapsedTimeFromLastUpdate(time);
     // If the tracker is old, delete it
     if (is_old) {
       auto erase_itr = itr;
@@ -182,7 +250,49 @@ void TrackerProcessor::removeOldTracker(const rclcpp::Time & time)
   }
 }
 
-// This function removes overlapped trackers based on distance and IoU criteria
+struct TrackerData
+{
+  types::DynamicObject object;
+  autoware_utils::Polygon2d polygon;
+  Box bbox;
+};
+
+static std::unordered_map<std::shared_ptr<Tracker>, TrackerData> calculateTrackerCache(
+  std::vector<std::shared_ptr<Tracker>> & trackers, const rclcpp::Time & time)
+{
+  std::unordered_map<std::shared_ptr<Tracker>, TrackerData> tracker_cache;
+  for (auto itr = trackers.begin(); itr != trackers.end();) {
+    types::DynamicObject obj;
+    if ((*itr)->getTrackedObject(time, obj)) {
+      const auto polygon = autoware_utils::to_polygon2d(obj.pose, obj.shape);
+      Box boost_bbox;
+      bg::envelope(polygon, boost_bbox);
+      tracker_cache[*itr] = {obj, polygon, boost_bbox};
+      ++itr;
+    } else {
+      itr = trackers.erase(itr);
+    }
+  }
+  return tracker_cache;
+}
+
+static bool overlappedObjects(const TrackerData & tracker1, const TrackerData & tracker2, double distance_threshold_sq)
+{
+  const auto & obj1 = tracker1.object;
+  const auto & obj2 = tracker2.object;
+  const double dx = obj1.pose.position.x - obj2.pose.position.x;
+  const double dy = obj1.pose.position.y - obj2.pose.position.y;
+  const double distance_sq = dx * dx + dy * dy;
+
+  return distance_sq < distance_threshold_sq ||
+         bg::intersects(tracker1.bbox, tracker2.bbox) || bg::within(tracker1.bbox, tracker2.bbox) ||
+         bg::within(tracker2.bbox, tracker1.bbox);
+}
+
+static double getIoU(double intersection_area, double union_area) {
+  return union_area < 1E-2 ? 0.0 : std::min(1.0, intersection_area / union_area);
+}
+
 void TrackerProcessor::removeOverlappedTracker(const rclcpp::Time & time)
 {
   std::unique_ptr<ScopedTimeTrack> st_ptr;
@@ -208,59 +318,123 @@ void TrackerProcessor::removeOverlappedTracker(const rclcpp::Time & time)
     });
 
   /* Iterate through the list of trackers */
+  auto tracker_cache = calculateTrackerCache(sorted_list_tracker, time);
   for (size_t i = 0; i < sorted_list_tracker.size(); ++i) {
-    types::DynamicObject object1;
-    if (!sorted_list_tracker[i]->getTrackedObject(time, object1)) continue;
+    const auto & cache_it1 = tracker_cache.find(sorted_list_tracker[i]);
+    if (cache_it1 == tracker_cache.end()) {
+      continue;
+    }
+    const auto & tracker_data1 = cache_it1->second;
+    const auto & object1_polygon = tracker_data1.polygon;
+
     // Compare the current tracker with the remaining trackers
     for (size_t j = i + 1; j < sorted_list_tracker.size(); ++j) {
-      types::DynamicObject object2;
-      if (!sorted_list_tracker[j]->getTrackedObject(time, object2)) continue;
+      const auto & cache_it2 = tracker_cache.find(sorted_list_tracker[j]);
+      if (cache_it2 == tracker_cache.end()) {
+        continue;
+      }
+      const auto & tracker_data2 = cache_it2->second;
+      const auto & object2_polygon = tracker_data2.polygon;
 
-      // Calculate the distance between the two objects
-      const double distance = std::hypot(
-        object1.pose.position.x - object2.pose.position.x,
-        object1.pose.position.y - object2.pose.position.y);
-      const auto & label1 = sorted_list_tracker[i]->getHighestProbLabel();
-      const auto & label2 = sorted_list_tracker[j]->getHighestProbLabel();
-      const double max_dist_matrix_value = config_.max_dist_matrix(
-        label2, label1);  // Get the maximum distance threshold for the labels
-
-      // If the distance is too large, skip
-      if (distance > max_dist_matrix_value) {
+      if (!overlappedObjects(tracker_data1, tracker_data2, config_.distance_threshold_sq)) {
         continue;
       }
 
       // Check the Intersection over Union (IoU) between the two objects
-      constexpr double min_union_iou_area = 1e-2;
-      const auto iou = shapes::get2dIoU(object1, object2, min_union_iou_area);
-      bool delete_candidate_tracker = false;
+      const double object1_area = bg::area(object1_polygon);
+      if (object1_area < 1E-6) {
+        continue;
+      }
+      const double object2_area = bg::area(object2_polygon);
+      if (object2_area < 1E-6) {
+        continue;
+      }
+      const double intersection_area =
+        object_recognition_utils::getIntersectionArea(object1_polygon, object2_polygon);
+      if (intersection_area < 1E-6) {
+        continue;
+      }
+      const double union_area = object_recognition_utils::getUnionArea(object1_polygon, object2_polygon);
+      const double iou = getIoU(intersection_area, union_area);
 
-      // If both trackers are UNKNOWN, delete the younger tracker
-      // If one side of the tracker is UNKNOWN, delete UNKNOWN objects
+      const auto & label1 = sorted_list_tracker[i]->getHighestProbLabel();
+      const auto & label2 = sorted_list_tracker[j]->getHighestProbLabel();
+
+      const double object1_overlap_ratio = intersection_area / object1_area;
+      const double object2_overlap_ratio = intersection_area / object2_area;
+      bool exceeded_overlap_ratio = object1_overlap_ratio > config_.min_object_removal_overlap ||
+                                    object2_overlap_ratio > config_.min_object_removal_overlap;
+
+      bool should_delete_tracker1 = false;
+      bool should_delete_tracker2 = false;
+      // Case 1: At least one tracker is UNKNOWN
       if (label1 == Label::UNKNOWN || label2 == Label::UNKNOWN) {
-        if (iou > config_.min_unknown_object_removal_iou) {
-          if (label2 == Label::UNKNOWN) {
-            delete_candidate_tracker = true;
+        // Case 1.1: Both trackers are UNKNOWN
+        if (label1 == Label::UNKNOWN && label2 == Label::UNKNOWN) {
+          if (exceeded_overlap_ratio) {
+            if (object1_overlap_ratio > object2_overlap_ratio) {
+              should_delete_tracker1 = true;
+            } else {
+              should_delete_tracker2 = true;
+            }
+          } else if (iou > config_.min_unknown_object_removal_iou_with_unknown) {
+            if (sorted_list_tracker[i]->getTotalMeasurementCount() < sorted_list_tracker[j]->getTotalMeasurementCount()) {
+              should_delete_tracker1 = true;
+            } else {
+              should_delete_tracker2 = true;
+            }
+          }
+          // Case 1.2: Only tracker1 is UNKNOWN
+        } else if (label1 == Label::UNKNOWN) {
+          if (
+            iou > config_.min_unknown_object_removal_iou_with_known ||
+            object1_overlap_ratio > config_.min_object_removal_overlap) {
+            should_delete_tracker1 = true;
+          }
+          // Case 1.3: Only tracker2 is UNKNOWN
+        } else if (label2 == Label::UNKNOWN) {
+          if (
+            iou > config_.min_unknown_object_removal_iou_with_known ||
+            object2_overlap_ratio > config_.min_object_removal_overlap) {
+            should_delete_tracker2 = true;
           }
         }
-      } else {  // If neither object is UNKNOWN, delete the younger tracker
-        if (iou > config_.min_known_object_removal_iou) {
-          /* erase only when prioritized one has a measurement */
-          delete_candidate_tracker = true;
+        // Case 2: Both trackers are KNOWN
+      } else if (exceeded_overlap_ratio) {
+        if (object1_overlap_ratio > object2_overlap_ratio) {
+          should_delete_tracker1 = true;
+        } else {
+          should_delete_tracker2 = true;
+        }
+      } else if (iou > config_.min_known_object_removal_iou) {
+        if (sorted_list_tracker[i]->getTotalMeasurementCount() < sorted_list_tracker[j]->getTotalMeasurementCount()) {
+          should_delete_tracker1 = true;
+        } else {
+          should_delete_tracker2 = true;
         }
       }
 
-      if (delete_candidate_tracker) {
-        /* erase only when prioritized one has later(or equal time) meas than the other's */
-        if (
-          sorted_list_tracker[i]->getElapsedTimeFromLastUpdate(time) <=
-          sorted_list_tracker[j]->getElapsedTimeFromLastUpdate(time)) {
+      auto remove = [&sorted_list_tracker, this](size_t & index) {
           // Remove from original list_tracker
-          list_tracker_.remove(sorted_list_tracker[j]);
+          list_tracker_.remove(sorted_list_tracker[index]);
           // Remove from sorted list
-          sorted_list_tracker.erase(sorted_list_tracker.begin() + j);
-          --j;
-        }
+          sorted_list_tracker.erase(sorted_list_tracker.begin() + index);
+          --index;
+      };
+
+      // Delete the tracker
+      if (
+        should_delete_tracker1 && isConfidentTracker(sorted_list_tracker[j]) &&
+        (label1 != Label::UNKNOWN || (sorted_list_tracker[i]->getTotalExistenceProbability() <
+                                      config_.min_unknown_object_add_existence_prob))) {
+        remove(i);
+        break;
+      }
+      if (
+        should_delete_tracker2 && isConfidentTracker(sorted_list_tracker[i]) &&
+        (label2 != Label::UNKNOWN || (sorted_list_tracker[j]->getTotalExistenceProbability() <
+                                      config_.min_unknown_object_add_existence_prob))) {
+        remove(j);
       }
     }
   }
@@ -272,7 +446,9 @@ bool TrackerProcessor::isConfidentTracker(const std::shared_ptr<Tracker> & track
   // If the number of measurements is equal to or greater than the threshold, the tracker is
   // considered confident.
   auto label = tracker->getHighestProbLabel();
-  return tracker->getTotalMeasurementCount() >= config_.confident_count_threshold.at(label);
+  return (
+    tracker->getTotalMeasurementCount() >= config_.confident_count_threshold.at(label) ||
+    tracker->getTotalExistenceProbability() > config_.min_unknown_object_add_existence_prob);
 }
 
 void TrackerProcessor::getTrackedObjects(
@@ -285,7 +461,9 @@ void TrackerProcessor::getTrackedObjects(
   types::DynamicObject tracked_object;
   for (const auto & tracker : list_tracker_) {
     // Skip if the tracker is not confident
-    if (!isConfidentTracker(tracker)) continue;
+    if (!isConfidentTracker(tracker)) {
+      continue;
+    }
     // Get the tracked object, extrapolated to the given time
     if (tracker->getTrackedObject(time, tracked_object)) {
       tracked_objects.objects.push_back(toTrackedObjectMsg(tracked_object));

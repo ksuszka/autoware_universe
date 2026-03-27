@@ -29,6 +29,7 @@
 #include <tf2_ros/create_timer_interface.h>
 #include <tf2_ros/create_timer_ros.h>
 
+#include <cmath>
 #include <iterator>
 #include <list>
 #include <map>
@@ -165,13 +166,27 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
       config.tracker_map.insert(std::make_pair(
         Label::MOTORCYCLE, this->declare_parameter<std::string>("motorcycle_tracker")));
 
-      // Declare parameters
       config.tracker_lifetime = declare_parameter<double>("tracker_lifetime");
       config.min_known_object_removal_iou =
         declare_parameter<double>("min_known_object_removal_iou");
-      config.min_unknown_object_removal_iou =
-        declare_parameter<double>("min_unknown_object_removal_iou");
+      config.min_unknown_object_removal_iou_with_known =
+        declare_parameter<double>("min_unknown_object_removal_iou_with_known", 0.2);
+      config.min_unknown_object_removal_iou_with_unknown =
+        declare_parameter<double>("min_unknown_object_removal_iou_with_unknown", 0.5);
+      config.distance_threshold_sq =
+        std::pow(declare_parameter<double>("distance_threshold", 5.0), 2.0);
 
+      config.unknown_lifetime = declare_parameter<double>("unknown_lifetime", 0.5);
+      config.min_object_removal_overlap =
+        declare_parameter<double>("min_object_removal_overlap", 0.9);
+      config.min_unknown_object_add_existence_prob =
+        declare_parameter<double>("min_unknown_object_add_existence_prob", 0.9);
+      // Parameters for isLargerThanChild function with default values matching the original hardcoded values
+      config.min_child_height = declare_parameter<double>("min_child_height", 0.5);
+      config.min_box_size_xy = declare_parameter<double>("min_box_size_xy", 0.25);
+      config.min_cylinder_radius = declare_parameter<double>("min_cylinder_radius", 0.25);
+      config.min_polygon_area = declare_parameter<double>("min_polygon_area", 0.1);
+      config.polygon_shrink_buffer = declare_parameter<double>("polygon_shrink_buffer", 0.125);
       // Map from class name to label
       std::map<std::string, LabelType> class_name_to_label = {
         {"UNKNOWN", Label::UNKNOWN}, {"CAR", Label::CAR},

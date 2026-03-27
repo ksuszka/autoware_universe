@@ -32,8 +32,12 @@
 
     # tracker parameters
     tracker_lifetime: 1.0  # [s]
-    min_known_object_removal_iou: 0.1  # [ratio]
-    min_unknown_object_removal_iou: 0.05  # [ratio]
+    unknown_lifetime: 0.5  # [s]
+    min_known_object_removal_iou: 0.2  # [ratio]
+    min_object_removal_overlap: 0.9 # [ratio]
+    min_unknown_object_removal_iou_with_known: 0.2  # [ratio]
+    min_unknown_object_removal_iou_with_unknown: 0.5 # [ratio]
+    min_unknown_object_add_existence_prob: 0.9  # [ratio]
     distance_threshold: 5.0  # [m]
     confident_count_threshold:
       UNKNOWN: 3
@@ -44,6 +48,12 @@
       MOTORBIKE: 3
       BICYCLE: 3
       PEDESTRIAN: 3
+    # parameters to pass new unknown objects to the tracker (larger than child heuristic)
+    min_child_height: 0.5
+    min_box_size_xy: 0.25
+    min_cylinder_radius: 0.25
+    min_polygon_area: 0.1
+    polygon_shrink_buffer: 0.125
 
     # debug parameters
     publish_processing_time: false

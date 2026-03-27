@@ -136,8 +136,8 @@ public:
         size_limit.height_min = 1.0;
         size_limit.height_max = 5.0;
 
-        process_noise.acc_long = const_g * 0.35;
-        process_noise.acc_lat = const_g * 0.15;
+        process_noise.acc_long = const_g * 0.55;
+        process_noise.acc_lat = const_g * 0.35;
         process_noise.yaw_rate_min = deg2rad(1.5);
         process_noise.yaw_rate_max = deg2rad(15.0);
 
@@ -180,8 +180,8 @@ public:
         size_limit.height_min = 1.0;
         size_limit.height_max = 10.0;
 
-        process_noise.acc_long = const_g * 0.35;
-        process_noise.acc_lat = const_g * 0.15;
+        process_noise.acc_long = const_g * 0.55;
+        process_noise.acc_lat = const_g * 0.35;
         process_noise.yaw_rate_min = deg2rad(1.5);
         process_noise.yaw_rate_max = deg2rad(15.0);
 
@@ -274,14 +274,14 @@ public:
         process_noise.acc_long = const_g * 0.3;
         process_noise.acc_turn = deg2rad(30.0);
 
-        process_limit.vel_long_max = kmph2mps(100.0);
+        process_limit.vel_long_max = kmph2mps(45.0);
         process_limit.yaw_rate_max = deg2rad(30.0);
 
         // initial covariance
         initial_covariance.pos_x = sq(2.0);
         initial_covariance.pos_y = sq(2.0);
         initial_covariance.yaw = sq(deg2rad(1000.0));
-        initial_covariance.vel_long = sq(kmph2mps(120.0));
+        initial_covariance.vel_long = sq(kmph2mps(45.0));
         initial_covariance.yaw_rate = sq(deg2rad(360.0));
 
         // measurement noise model

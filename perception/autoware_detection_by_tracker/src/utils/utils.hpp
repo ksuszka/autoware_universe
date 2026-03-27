@@ -1,4 +1,5 @@
 // Copyright 2023 TIER IV, Inc.
+// Copyright (c) 2025 Autonomous Systems Sp. z o.o.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +16,16 @@
 #ifndef UTILS__UTILS_HPP_
 #define UTILS__UTILS_HPP_
 
-#include "autoware_perception_msgs/msg/object_classification.hpp"
+#include <autoware/object_recognition_utils/object_recognition_utils.hpp>
+#include <autoware/shape_estimation/shape_estimator.hpp>
+#include <autoware_utils/geometry/boost_geometry.hpp>
+#include <autoware_utils/math/unit_conversion.hpp>
+
+#include <autoware_perception_msgs/msg/object_classification.hpp>
+#include <autoware_perception_msgs/msg/shape.hpp>
+#include <tier4_perception_msgs/msg/detected_objects_with_feature.hpp>
+
+#include <boost/optional/optional.hpp>
 
 #include <cstdint>
 
@@ -24,6 +34,7 @@ namespace autoware::detection_by_tracker
 namespace utils
 {
 using Label = autoware_perception_msgs::msg::ObjectClassification;
+namespace bg = boost::geometry;
 
 struct TrackerIgnoreLabel
 {
@@ -43,6 +54,25 @@ struct TrackerIgnoreLabel
            (label == Label::BICYCLE && BICYCLE) || (label == Label::PEDESTRIAN && PEDESTRIAN);
   }
 };
+
+void setClusterInObjectWithFeature(
+  const std_msgs::msg::Header & header, const pcl::PointCloud<pcl::PointXYZ> & cluster,
+  tier4_perception_msgs::msg::DetectedObjectWithFeature & feature_object);
+
+autoware_perception_msgs::msg::Shape extendShape(
+  const autoware_perception_msgs::msg::Shape & shape, const float scale);
+
+std::vector<autoware_utils::Polygon2d> bufferPolygon2d(
+  const autoware_utils::Polygon2d & polygon, const double buffer_distance);
+
+boost::optional<autoware::shape_estimation::ReferenceYawInfo> getReferenceYawInfo(
+  const uint8_t label, const float yaw);
+
+boost::optional<autoware::shape_estimation::ReferenceShapeSizeInfo> getReferenceShapeSizeInfo(
+  const uint8_t label, const autoware_perception_msgs::msg::Shape & shape);
+
+std::tuple<pcl::PointCloud<pcl::PointXYZ>, pcl::PointCloud<pcl::PointXYZ>> splitPointsInsidePolygon(
+  const autoware_utils::Polygon2d & polygon, const pcl::PointCloud<pcl::PointXYZ> & input);
 
 }  // namespace utils
 }  // namespace autoware::detection_by_tracker

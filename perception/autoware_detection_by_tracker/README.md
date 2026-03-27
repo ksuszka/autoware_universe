@@ -29,6 +29,18 @@ Simply looking at the overlap between the unknown object and the tracker does no
 2. In order to divide the cluster of under segmented objects, it iterate the parameters to make small clusters.
 3. Adjust the parameters several times and adopt the one with the highest IoU.
 
+### Object Splitter
+
+The object splitter component is an alternative approach to handling segmentation issues. It works by:
+
+1. Processing tracked objects and input clusters to improve detection accuracy by splitting under-segmented clusters.
+2. Creating extended polygons for each tracked object based on its class (larger vehicles use shape scaling, smaller objects use buffer approach).
+3. Splitting clusters that intersect with a tracked object's extended polygon.
+4. Updating tracked objects shapes and positions using the points inside their extended polygons.
+5. Re-clustering points that don't belong to any tracked object to create additional objects.
+
+This approach provides more robust handling of cases where parts of objects may be incorrectly removed in the initial detection.
+
 ## Inputs / Outputs
 
 ### Input
@@ -56,6 +68,11 @@ Simply looking at the overlap between the unknown object and the tracker does no
 | `tracker_ignore_label.BUS`        | `bool` | If true, the node will ignore the tracker if its label is bus.        | `false`       |
 | `tracker_ignore_label.TRUCK`      | `bool` | If true, the node will ignore the tracker if its label is truck.      | `false`       |
 | `tracker_ignore_label.TRAILER`    | `bool` | If true, the node will ignore the tracker if its label is TRAILER.    | `false`       |
+| `use_object_splitter`             | `bool` | Enable the object splitter component                                  | `true`        |
+| `extend_scale`                    | `double` | Scale factor to extend large object polygons (car/truck/bus/trailer)  | `1.05`        |
+| `buffer_distance`                 | `double` | Buffer distance for small object polygons (pedestrian/bicycle/motorcycle) | `0.1`       |
+| `existence_probability_threshold` | `double` | Minimum probability threshold for processing objects                 | `0.08`        |
+| `existence_probability_modifier`  | `double` | Modifier for adjusting existence probability after updates           | `0.5`         |
 
 ## Assumptions / Known limits
 

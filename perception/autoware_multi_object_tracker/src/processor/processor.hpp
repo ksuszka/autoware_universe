@@ -39,11 +39,25 @@ using LabelType = autoware_perception_msgs::msg::ObjectClassification::_label_ty
 struct TrackerProcessorConfig
 {
   std::map<LabelType, std::string> tracker_map;
-  float tracker_lifetime;                              // [s]
-  float min_known_object_removal_iou;                  // ratio [0, 1]
-  float min_unknown_object_removal_iou;                // ratio [0, 1]
-  std::map<LabelType, int> confident_count_threshold;  // [count]
+  size_t channel_size;
+  double tracker_lifetime;   // [s]
+  double min_known_object_removal_iou; // ratio [0, 1]
+  double min_unknown_object_removal_iou_with_known; // ratio [0, 1]
+  double min_unknown_object_removal_iou_with_unknown; // ratio [0, 1]
   Eigen::MatrixXd max_dist_matrix;
+  double distance_threshold_sq;
+  std::map<LabelType, int> confident_count_threshold; // [count]
+
+  double unknown_lifetime;
+  double min_object_removal_overlap;
+  double min_unknown_object_add_existence_prob;
+
+  // Parameters for to check if the object is larger than the child
+  double min_child_height;
+  double min_box_size_xy;
+  double min_cylinder_radius;
+  double min_polygon_area;
+  double polygon_shrink_buffer;
 };
 
 class TrackerProcessor
@@ -88,6 +102,7 @@ private:
   std::unique_ptr<DataAssociation> association_;
 
   std::list<std::shared_ptr<Tracker>> list_tracker_;
+  bool isLargerThanChild(const types::DynamicObject & object);
   void removeOldTracker(const rclcpp::Time & time);
   void removeOverlappedTracker(const rclcpp::Time & time);
   std::shared_ptr<Tracker> createNewTracker(

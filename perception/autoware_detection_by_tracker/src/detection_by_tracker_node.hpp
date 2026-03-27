@@ -1,4 +1,5 @@
 // Copyright 2021 Tier IV, Inc.
+// Copyright (c) 2025 Autonomous Systems Sp. z o.o.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,9 +22,12 @@
 #include "autoware/shape_estimation/shape_estimator.hpp"
 #include "autoware_utils/ros/published_time_publisher.hpp"
 #include "debugger/debugger.hpp"
+#include "object_splitter/object_splitter.hpp"
 #include "tracker/tracker_handler.hpp"
 #include "utils/utils.hpp"
 
+#include <autoware_utils/geometry/boost_geometry.hpp>
+#include <autoware_utils/geometry/geometry.hpp>
 #include <rclcpp/rclcpp.hpp>
 
 #include "autoware_perception_msgs/msg/detected_objects.hpp"
@@ -32,9 +36,13 @@
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 
+#include <boost/geometry/core/cs.hpp>
+
 #include <tf2/LinearMath/Transform.h>
 #include <tf2/convert.h>
 #include <tf2/transform_datatypes.h>
+
+#include <string>
 
 #ifdef ROS_DISTRO_GALACTIC
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
@@ -53,16 +61,27 @@
 namespace autoware::detection_by_tracker
 {
 
+namespace bgi = boost::geometry::index;
+using autoware_utils::Point2d;
+using autoware_utils::Polygon2d;
+
+using Box = boost::geometry::model::box<Point2d>;
+using BoxAndDetectedObjectWithFeature =
+  std::pair<Box, tier4_perception_msgs::msg::DetectedObjectWithFeature>;
+using MultiCluster = std::vector<pcl::PointCloud<pcl::PointXYZ>>;
+using DetectedObjectsWithFeature = tier4_perception_msgs::msg::DetectedObjectsWithFeature;
+using DetectedObjects = autoware_perception_msgs::msg::DetectedObjects;
+using DetectedObject = autoware_perception_msgs::msg::DetectedObject;
+
 class DetectionByTracker : public rclcpp::Node
 {
 public:
   explicit DetectionByTracker(const rclcpp::NodeOptions & node_options);
 
 private:
-  rclcpp::Publisher<autoware_perception_msgs::msg::DetectedObjects>::SharedPtr objects_pub_;
+  rclcpp::Publisher<DetectedObjects>::SharedPtr objects_pub_;
   rclcpp::Subscription<autoware_perception_msgs::msg::TrackedObjects>::SharedPtr trackers_sub_;
-  rclcpp::Subscription<tier4_perception_msgs::msg::DetectedObjectsWithFeature>::SharedPtr
-    initial_objects_sub_;
+  rclcpp::Subscription<DetectedObjectsWithFeature>::SharedPtr initial_objects_sub_;
 
   tf2_ros::Buffer tf_buffer_;
   tf2_ros::TransformListener tf_listener_;
@@ -74,14 +93,22 @@ private:
   std::map<uint8_t, int> max_search_distance_for_merger_;
   std::map<uint8_t, int> max_search_distance_for_divider_;
 
+  bool use_object_splitter_;
+
+  // Object splitter parameters
+  double extend_scale_;
+  double buffer_distance_;
+  double existence_probability_threshold_;
+  double existence_probability_modifier_;
+
   detection_by_tracker::utils::TrackerIgnoreLabel tracker_ignore_;
 
   std::unique_ptr<autoware_utils::PublishedTimePublisher> published_time_publisher_;
+  std::shared_ptr<ObjectSplitter> object_splitter_;
 
   void setMaxSearchRange();
 
-  void onObjects(
-    const tier4_perception_msgs::msg::DetectedObjectsWithFeature::ConstSharedPtr input_msg);
+  void onObjects(const DetectedObjectsWithFeature::ConstSharedPtr input_msg);
 
   void divideUnderSegmentedObjects(
     const autoware_perception_msgs::msg::DetectedObjects & tracked_objects,

@@ -64,6 +64,11 @@ public:
     const types::InputChannel & channel_info);
   bool updateWithoutMeasurement(const rclcpp::Time & now);
 
+  void setTotalMeasurementCount(const int total_measurement_count)
+  {
+    total_measurement_count_ = total_measurement_count;
+  }
+
   std::uint8_t getHighestProbLabel() const
   {
     return autoware::object_recognition_utils::getHighestProbLabel(object_.classification);
@@ -73,6 +78,7 @@ public:
   int getNoMeasurementCount() const { return no_measurement_count_; }
   int getTotalNoMeasurementCount() const { return total_no_measurement_count_; }
   int getTotalMeasurementCount() const { return total_measurement_count_; }
+  float getTotalExistenceProbability() const { return total_existence_probability_; }
   double getElapsedTimeFromLastUpdate(const rclcpp::Time & current_time) const
   {
     return (current_time - last_update_with_measurement_time_).seconds();

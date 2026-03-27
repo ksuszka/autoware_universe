@@ -40,8 +40,8 @@ UnknownTracker::UnknownTracker(const rclcpp::Time & time, const types::DynamicOb
 {
   // Set motion model parameters
   {
-    constexpr double q_stddev_x = 0.5;         // [m/s]
-    constexpr double q_stddev_y = 0.5;         // [m/s]
+    constexpr double q_stddev_x = 1.0;         // [m/s]
+    constexpr double q_stddev_y = 1.0;         // [m/s]
     constexpr double q_stddev_vx = 9.8 * 0.3;  // [m/(s*s)]
     constexpr double q_stddev_vy = 9.8 * 0.3;  // [m/(s*s)]
     motion_model_.setMotionParams(q_stddev_x, q_stddev_y, q_stddev_vx, q_stddev_vy);
@@ -49,8 +49,8 @@ UnknownTracker::UnknownTracker(const rclcpp::Time & time, const types::DynamicOb
 
   // Set motion limits
   motion_model_.setMotionLimits(
-    autoware_utils::kmph2mps(60), /* [m/s] maximum velocity, x */
-    autoware_utils::kmph2mps(60)  /* [m/s] maximum velocity, y */
+    autoware_utils::kmph2mps(0.1), /* [m/s] maximum velocity, x */
+    autoware_utils::kmph2mps(0.1)  /* [m/s] maximum velocity, y */
   );
 
   // Change tracker movement by zeroing object covariance

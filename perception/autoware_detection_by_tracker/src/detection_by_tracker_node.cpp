@@ -1,4 +1,5 @@
 // Copyright 2021 Tier IV, Inc.
+// Copyright (c) 2025 Autonomous Systems Sp. z o.o.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,13 +17,28 @@
 
 #include "detection_by_tracker_node.hpp"
 
+#include <autoware_utils/geometry/alt_geometry.hpp>
+#include <autoware_utils/geometry/boost_geometry.hpp>
+#include <autoware_utils/geometry/geometry.hpp>
+#include <autoware_utils/math/unit_conversion.hpp>
+
+#include <pcl/impl/point_types.hpp>
+
+#include <boost/geometry/algorithms/correct.hpp>
+#include <boost/geometry/algorithms/detail/intersects/interface.hpp>
+#include <boost/geometry/index/predicates.hpp>
+
+#include <pcl/point_cloud.h>
+#include <pcl_conversions/pcl_conversions.h>
+
 #include "autoware/object_recognition_utils/object_recognition_utils.hpp"
-#include "autoware_utils/geometry/geometry.hpp"
-#include "autoware_utils/math/unit_conversion.hpp"
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
+#include <boost/geometry/algorithms/difference.hpp>
+
+#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -30,57 +46,8 @@
 #include <vector>
 
 using Label = autoware_perception_msgs::msg::ObjectClassification;
-namespace
-{
-void setClusterInObjectWithFeature(
-  const std_msgs::msg::Header & header, const pcl::PointCloud<pcl::PointXYZ> & cluster,
-  tier4_perception_msgs::msg::DetectedObjectWithFeature & feature_object)
-{
-  sensor_msgs::msg::PointCloud2 ros_pointcloud;
-  pcl::toROSMsg(cluster, ros_pointcloud);
-  ros_pointcloud.header = header;
-  feature_object.feature.cluster = ros_pointcloud;
-}
-autoware_perception_msgs::msg::Shape extendShape(
-  const autoware_perception_msgs::msg::Shape & shape, const float scale)
-{
-  autoware_perception_msgs::msg::Shape output = shape;
-  output.dimensions.x *= scale;
-  output.dimensions.y *= scale;
-  output.dimensions.z *= scale;
-  for (auto & point : output.footprint.points) {
-    point.x *= scale;
-    point.y *= scale;
-    point.z *= scale;
-  }
-  return output;
-}
-
-boost::optional<autoware::shape_estimation::ReferenceYawInfo> getReferenceYawInfo(
-  const uint8_t label, const float yaw)
-{
-  const bool is_vehicle =
-    Label::CAR == label || Label::TRUCK == label || Label::BUS == label || Label::TRAILER == label;
-  if (is_vehicle) {
-    return autoware::shape_estimation::ReferenceYawInfo{yaw, autoware_utils::deg2rad(30)};
-  } else {
-    return boost::none;
-  }
-}
-
-boost::optional<autoware::shape_estimation::ReferenceShapeSizeInfo> getReferenceShapeSizeInfo(
-  const uint8_t label, const autoware_perception_msgs::msg::Shape & shape)
-{
-  const bool is_vehicle =
-    Label::CAR == label || Label::TRUCK == label || Label::BUS == label || Label::TRAILER == label;
-  if (is_vehicle) {
-    return autoware::shape_estimation::ReferenceShapeSizeInfo{
-      shape, autoware::shape_estimation::ReferenceShapeSizeInfo::Mode::Min};
-  } else {
-    return boost::none;
-  }
-}
-}  // namespace
+using PointCloud2 = sensor_msgs::msg::PointCloud2;
+using PointCloud2ConstPtr = sensor_msgs::msg::PointCloud2::ConstSharedPtr;
 
 namespace autoware::detection_by_tracker
 {
@@ -94,12 +61,10 @@ DetectionByTracker::DetectionByTracker(const rclcpp::NodeOptions & node_options)
   trackers_sub_ = create_subscription<autoware_perception_msgs::msg::TrackedObjects>(
     "~/input/tracked_objects", rclcpp::QoS{1},
     std::bind(&TrackerHandler::onTrackedObjects, &tracker_handler_, std::placeholders::_1));
-  initial_objects_sub_ =
-    create_subscription<tier4_perception_msgs::msg::DetectedObjectsWithFeature>(
-      "~/input/initial_objects", rclcpp::QoS{1},
-      std::bind(&DetectionByTracker::onObjects, this, std::placeholders::_1));
-  objects_pub_ =
-    create_publisher<autoware_perception_msgs::msg::DetectedObjects>("~/output", rclcpp::QoS{1});
+  initial_objects_sub_ = create_subscription<DetectedObjectsWithFeature>(
+    "~/input/initial_objects", rclcpp::QoS{1},
+    std::bind(&DetectionByTracker::onObjects, this, std::placeholders::_1));
+  objects_pub_ = create_publisher<DetectedObjects>("~/output", rclcpp::QoS{1});
 
   // Set parameters
   tracker_ignore_.UNKNOWN = declare_parameter<bool>("tracker_ignore_label.UNKNOWN");
@@ -116,7 +81,22 @@ DetectionByTracker::DetectionByTracker(const rclcpp::NodeOptions & node_options)
 
   shape_estimator_ = std::make_shared<autoware::shape_estimation::ShapeEstimator>(true, true);
   cluster_ = std::make_shared<autoware::euclidean_cluster::VoxelGridBasedEuclideanCluster>(
-    false, 10, 10000, 0.7, 0.3, 0);
+    false, 1, 1000000000, 0.3, 0.2, 1);
+
+  use_object_splitter_ = declare_parameter<bool>("use_object_splitter", "true");
+
+  if (use_object_splitter_) {
+    extend_scale_ = declare_parameter<double>("extend_scale", 1.05);
+    buffer_distance_ = declare_parameter<double>("buffer_distance", 0.1);
+    existence_probability_threshold_ =
+      declare_parameter<double>("existence_probability_threshold", 0.08);
+    existence_probability_modifier_ =
+      declare_parameter<double>("existence_probability_modifier", 0.5);
+    object_splitter_ = std::make_shared<ObjectSplitter>(
+      max_search_distance_for_divider_, tracker_ignore_, shape_estimator_, cluster_, extend_scale_,
+      buffer_distance_, existence_probability_threshold_, existence_probability_modifier_,
+      this->get_logger());
+  }
   debugger_ = std::make_shared<Debugger>(this);
   published_time_publisher_ = std::make_unique<autoware_utils::PublishedTimePublisher>(this);
 }
@@ -145,15 +125,14 @@ void DetectionByTracker::setMaxSearchRange()
   max_search_distance_for_divider_[Label::PEDESTRIAN] = 2.0;
 }
 
-void DetectionByTracker::onObjects(
-  const tier4_perception_msgs::msg::DetectedObjectsWithFeature::ConstSharedPtr input_msg)
+void DetectionByTracker::onObjects(const DetectedObjectsWithFeature::ConstSharedPtr input_msg)
 {
   debugger_->startMeasureProcessingTime();
-  autoware_perception_msgs::msg::DetectedObjects detected_objects;
+  DetectedObjects detected_objects;
   detected_objects.header = input_msg->header;
 
   // get objects from tracking module
-  autoware_perception_msgs::msg::DetectedObjects tracked_objects;
+  DetectedObjects tracked_objects;
   {
     autoware_perception_msgs::msg::TrackedObjects objects, transformed_objects;
     const bool available_trackers =
@@ -172,25 +151,31 @@ void DetectionByTracker::onObjects(
   debugger_->publishInitialObjects(*input_msg);
   debugger_->publishTrackedObjects(tracked_objects);
 
-  // merge over segmented objects
-  tier4_perception_msgs::msg::DetectedObjectsWithFeature merged_objects;
-  autoware_perception_msgs::msg::DetectedObjects no_found_tracked_objects;
-  mergeOverSegmentedObjects(tracked_objects, *input_msg, no_found_tracked_objects, merged_objects);
-  debugger_->publishMergedObjects(merged_objects);
+  if (object_splitter_) {
+    // split under segmented objects and re-estimate tracked objects
+    object_splitter_->process(*input_msg, tracked_objects, detected_objects);
+  } else {
+    // merge over segmented objects
+    tier4_perception_msgs::msg::DetectedObjectsWithFeature merged_objects;
+    autoware_perception_msgs::msg::DetectedObjects no_found_tracked_objects;
+    mergeOverSegmentedObjects(
+      tracked_objects, *input_msg, no_found_tracked_objects, merged_objects);
+    debugger_->publishMergedObjects(merged_objects);
 
-  // divide under segmented objects
-  tier4_perception_msgs::msg::DetectedObjectsWithFeature divided_objects;
-  autoware_perception_msgs::msg::DetectedObjects temp_no_found_tracked_objects;
-  divideUnderSegmentedObjects(
-    no_found_tracked_objects, *input_msg, temp_no_found_tracked_objects, divided_objects);
-  debugger_->publishDividedObjects(divided_objects);
+    // divide under segmented objects
+    tier4_perception_msgs::msg::DetectedObjectsWithFeature divided_objects;
+    autoware_perception_msgs::msg::DetectedObjects temp_no_found_tracked_objects;
+    divideUnderSegmentedObjects(
+      no_found_tracked_objects, *input_msg, temp_no_found_tracked_objects, divided_objects);
+    debugger_->publishDividedObjects(divided_objects);
 
-  // merge under/over segmented objects to build output objects
-  for (const auto & merged_object : merged_objects.feature_objects) {
-    detected_objects.objects.push_back(merged_object.object);
-  }
-  for (const auto & divided_object : divided_objects.feature_objects) {
-    detected_objects.objects.push_back(divided_object.object);
+    // merge under/over segmented objects to build output objects
+    for (const auto & merged_object : merged_objects.feature_objects) {
+      detected_objects.objects.push_back(merged_object.object);
+    }
+    for (const auto & divided_object : divided_objects.feature_objects) {
+      detected_objects.objects.push_back(divided_object.object);
+    }
   }
 
   objects_pub_->publish(detected_objects);
@@ -302,9 +287,9 @@ float DetectionByTracker::optimizeUnderSegmentedObject(
     for (const auto & divided_cluster : divided_clusters) {
       bool is_shape_estimated = shape_estimator_->estimateShapeAndPose(
         label, divided_cluster,
-        getReferenceYawInfo(
+        utils::getReferenceYawInfo(
           label, tf2::getYaw(target_object.kinematics.pose_with_covariance.pose.orientation)),
-        getReferenceShapeSizeInfo(label, target_object.shape), ref_pose,
+        utils::getReferenceShapeSizeInfo(label, target_object.shape), ref_pose,
         highest_iou_object_in_current_iter.object.shape,
         highest_iou_object_in_current_iter.object.kinematics.pose_with_covariance.pose);
       if (!is_shape_estimated) {
@@ -314,7 +299,7 @@ float DetectionByTracker::optimizeUnderSegmentedObject(
         highest_iou_object_in_current_iter.object, target_object);
       if (highest_iou_in_current_iter < iou) {
         highest_iou_in_current_iter = iou;
-        setClusterInObjectWithFeature(
+        utils::setClusterInObjectWithFeature(
           under_segmented_cluster.header, divided_cluster, highest_iou_object_in_current_iter);
       }
     }
@@ -357,7 +342,7 @@ void DetectionByTracker::mergeOverSegmentedObjects(
 
     // extend shape
     autoware_perception_msgs::msg::DetectedObject extended_tracked_object = tracked_object;
-    extended_tracked_object.shape = extendShape(tracked_object.shape, /*scale*/ 1.1);
+    extended_tracked_object.shape = utils::extendShape(tracked_object.shape, /*scale*/ 1.1);
 
     pcl::PointCloud<pcl::PointXYZ> pcl_merged_cluster;
     for (const auto & initial_object : in_cluster_objects.feature_objects) {
@@ -391,9 +376,9 @@ void DetectionByTracker::mergeOverSegmentedObjects(
 
     bool is_shape_estimated = shape_estimator_->estimateShapeAndPose(
       label, pcl_merged_cluster,
-      getReferenceYawInfo(
+      utils::getReferenceYawInfo(
         label, tf2::getYaw(tracked_object.kinematics.pose_with_covariance.pose.orientation)),
-      getReferenceShapeSizeInfo(label, tracked_object.shape),
+    utils::getReferenceShapeSizeInfo(label, tracked_object.shape),
       tracked_object.kinematics.pose_with_covariance.pose, feature_object.object.shape,
       feature_object.object.kinematics.pose_with_covariance.pose);
     if (!is_shape_estimated) {
@@ -403,7 +388,8 @@ void DetectionByTracker::mergeOverSegmentedObjects(
 
     feature_object.object.existence_probability =
       autoware::object_recognition_utils::get2dIoU(tracked_object, feature_object.object);
-    setClusterInObjectWithFeature(in_cluster_objects.header, pcl_merged_cluster, feature_object);
+    utils::setClusterInObjectWithFeature(
+      in_cluster_objects.header, pcl_merged_cluster, feature_object);
     out_objects.feature_objects.push_back(feature_object);
   }
 }
