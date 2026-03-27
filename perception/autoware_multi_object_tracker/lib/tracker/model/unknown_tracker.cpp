@@ -49,8 +49,8 @@ UnknownTracker::UnknownTracker(const rclcpp::Time & time, const types::DynamicOb
 
   // Set motion limits
   motion_model_.setMotionLimits(
-    autoware_utils::kmph2mps(0.1), /* [m/s] maximum velocity, x */
-    autoware_utils::kmph2mps(0.1)  /* [m/s] maximum velocity, y */
+    autoware_utils::kmph2mps(2), /* [m/s] maximum velocity, x */
+    autoware_utils::kmph2mps(2)  /* [m/s] maximum velocity, y */
   );
 
   // Change tracker movement by zeroing object covariance

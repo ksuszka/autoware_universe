@@ -22,7 +22,9 @@
 #include <lanelet2_core/primitives/Lanelet.h>
 #include <lanelet2_core/primitives/LineString.h>
 #include <lanelet2_core/primitives/Point.h>
+#include <Eigen/src/Geometry/Rotation2D.h>
 
+#include <cmath>
 #include <vector>
 
 using autoware::mission_planner_universe::lanelet2::convert_linear_ring_to_polygon;
@@ -338,27 +340,59 @@ TEST(TestUtilityFunctions, project_goal_to_map)
   check_height(-1.0);
 }
 
-TEST(TestUtilityFunctions, TestUtilityFunctions)
-{
+
+/**
+ * @brief Creates straightforward lanelet with 3 points.
+ * @param yaw Yaw direction of the lanelet.
+ * @param start Position of the first point of the lanelet centerline.
+ * @param length Length of the lanelet.
+ * @param length Width of the lanelet.
+ * @param points Number of points of the lanelet centerline.
+ * @return The lanelet.
+ */
+lanelet::Lanelet create_straightforward_lanelet(
+  double yaw=0.0,
+  const Eigen::Vector3d start = {-1, 0, 0},
+  double length = 2.0,
+  double width = 1.0,
+  size_t points = 3) {
+  assert(points > 1);
+  Eigen::Rotation2Dd rot(yaw);
+
   lanelet::LineString3d left_bound;
   lanelet::LineString3d right_bound;
-  left_bound.push_back(lanelet::Point3d{lanelet::InvalId, -1, -1});
-  left_bound.push_back(lanelet::Point3d{lanelet::InvalId, 0, -1});
-  left_bound.push_back(lanelet::Point3d{lanelet::InvalId, 1, -1});
-  right_bound.push_back(lanelet::Point3d{lanelet::InvalId, -1, 1});
-  right_bound.push_back(lanelet::Point3d{lanelet::InvalId, 0, 1});
-  right_bound.push_back(lanelet::Point3d{lanelet::InvalId, 1, 1});
-  lanelet::Lanelet lanelet{lanelet::InvalId, left_bound, right_bound};
-
   lanelet::LineString3d centerline;
-  centerline.push_back(lanelet::Point3d{lanelet::InvalId, -1, 0});
-  centerline.push_back(lanelet::Point3d{lanelet::InvalId, 0, 0});
-  centerline.push_back(lanelet::Point3d{lanelet::InvalId, 1, 0});
+
+  auto to_3d = [](Eigen::Vector2d v) -> Eigen::Vector3d { return {v.x(), v.y(), 0}; };
+  auto forward = to_3d(rot * Eigen::Vector2d{length / (points - 1), 0});
+  auto left = to_3d(rot * Eigen::Vector2d{0, -width});
+  auto right = to_3d(rot * Eigen::Vector2d{0, +width});
+
+  auto point = start;
+  for(size_t i=0; i < points; i++, point += forward)
+  {
+    left_bound.push_back({lanelet::InvalId, point + left});
+    right_bound.push_back({lanelet::InvalId, point + right});
+    centerline.push_back({lanelet::InvalId, point});
+  }
+
+  lanelet::Lanelet lanelet{lanelet::InvalId, left_bound, right_bound};
   lanelet.setCenterline(centerline);
 
+  return lanelet;
+}
+
+VehicleInfo create_vehicle_info(double left = 0.5, double right = 0.5) {
   VehicleInfo vehicle_info;
-  vehicle_info.left_overhang_m = 0.5;
-  vehicle_info.right_overhang_m = 0.5;
+  vehicle_info.left_overhang_m = left;
+  vehicle_info.right_overhang_m = right;
+  return vehicle_info;
+}
+
+TEST(TestUtilityFunctions, get_closest_centerline_pose)
+{
+  auto lanelet = create_straightforward_lanelet();
+  auto vehicle_info = create_vehicle_info();
 
   {
     const lanelet::Point3d point{lanelet::InvalId, 0, 0};
@@ -420,6 +454,136 @@ TEST(TestUtilityFunctions, TestUtilityFunctions)
       get_closest_centerline_pose({lanelet}, convertBasicPoint3dToPose(point, 0.0), vehicle_info);
     EXPECT_DOUBLE_EQ(pose.position.x, 0.0);
     EXPECT_DOUBLE_EQ(pose.position.y, 0.0);
+    EXPECT_DOUBLE_EQ(pose.position.z, 0.0);
+  }
+}
+
+
+TEST(TestUtilityFunctions, get_closest_centerline_pose__two_lanelets)
+{
+  auto first_lanelet = create_straightforward_lanelet(0.0, {-1, 0});
+  auto second_lanelet = create_straightforward_lanelet(0.0, {1, 0});
+  auto vehicle_info = create_vehicle_info();
+
+  auto get_centerline_pose = [&](lanelet::Point3d point) {
+    return 
+      get_closest_centerline_pose({first_lanelet, second_lanelet}, convertBasicPoint3dToPose(point, 0.0), vehicle_info);
+  };
+
+  {
+    // From the first lanelet.
+    const lanelet::Point3d point{lanelet::InvalId, 0, 0};
+    const Pose pose = get_centerline_pose(point);
+    EXPECT_DOUBLE_EQ(pose.position.x, 0.0);
+    EXPECT_DOUBLE_EQ(pose.position.y, 0.0);
+    EXPECT_DOUBLE_EQ(pose.position.z, 0.0);
+  }
+
+  {
+    // From the second lanelet.
+    const lanelet::Point3d point{lanelet::InvalId, 2, 2};
+    const Pose pose = get_centerline_pose(point);
+    EXPECT_DOUBLE_EQ(pose.position.x, 2.0);
+    EXPECT_DOUBLE_EQ(pose.position.y, 2.0);
+    EXPECT_DOUBLE_EQ(pose.position.z, 0.0);
+  }
+}
+
+TEST(TestUtilityFunctions, get_closest_centerline_pose__smaller_left_overhang)
+{
+  auto lanelet = create_straightforward_lanelet();
+  auto vehicle_info = create_vehicle_info(0.2, 0.4);
+
+  {
+    const lanelet::Point3d point{lanelet::InvalId, 0, 0};
+    const Pose pose =
+      get_closest_centerline_pose({lanelet}, convertBasicPoint3dToPose(point, 0.0), vehicle_info);
+    EXPECT_DOUBLE_EQ(pose.position.x, 0.0);
+    // y = (right - left) / 2 = (0.4 - 0.2) / 2 = 0.1
+    EXPECT_DOUBLE_EQ(pose.position.y, 0.1);
+    EXPECT_DOUBLE_EQ(pose.position.z, 0.0);
+  }
+}
+
+TEST(TestUtilityFunctions, get_closest_centerline_pose__smaller_right_overhang)
+{
+  auto lanelet = create_straightforward_lanelet();
+  auto vehicle_info = create_vehicle_info(0.4, 0.2);
+
+  {
+    const lanelet::Point3d point{lanelet::InvalId, 0, 0};
+    const Pose pose =
+      get_closest_centerline_pose({lanelet}, convertBasicPoint3dToPose(point, 0.0), vehicle_info);
+    EXPECT_DOUBLE_EQ(pose.position.x, 0.0);
+    // y = (right - left) / 2 = (0.2 - 0.4) / 2 = -0.1
+    EXPECT_DOUBLE_EQ(pose.position.y, -0.1);
+    EXPECT_DOUBLE_EQ(pose.position.z, 0.0);
+  }
+}
+
+TEST(TestUtilityFunctions, get_closest_centerline_pose__adjacent_to_centerline)
+{
+  auto lanelet = create_straightforward_lanelet();
+  auto vehicle_info = create_vehicle_info();
+
+  {
+    const lanelet::Point3d point{lanelet::InvalId, 0, 0.5};
+    const Pose pose =
+      get_closest_centerline_pose({lanelet}, convertBasicPoint3dToPose(point, 0.0), vehicle_info);
+    EXPECT_DOUBLE_EQ(pose.position.x, 0.0);
+    // y axis should be adjacent to centerline y.
+    EXPECT_DOUBLE_EQ(pose.position.y, 0.0);
+    EXPECT_DOUBLE_EQ(pose.position.z, 0.0);
+  }
+}
+
+
+TEST(TestUtilityFunctions, get_closest_centerline_pose__between_points)
+{
+  auto lanelet = create_straightforward_lanelet();
+  auto vehicle_info = create_vehicle_info();
+
+  {
+    const lanelet::Point3d point{lanelet::InvalId, 0.5, 0.0};
+    const Pose pose =
+      get_closest_centerline_pose({lanelet}, convertBasicPoint3dToPose(point, 0.0), vehicle_info);
+    // Interpolated between two points: {0.0, 0.0} and {1.0, 0.0}.
+    EXPECT_DOUBLE_EQ(pose.position.x, 0.5);
+    EXPECT_DOUBLE_EQ(pose.position.y, 0.0);
+    EXPECT_DOUBLE_EQ(pose.position.z, 0.0);
+  }
+}
+
+TEST(TestUtilityFunctions, get_closest_centerline_pose__between_points__horizontal)
+{
+  auto lanelet = create_straightforward_lanelet(M_PI / 2.0, {0, 0});
+  auto vehicle_info = create_vehicle_info();
+
+  {
+    const lanelet::Point3d point{lanelet::InvalId, 0.5 + 0.1, 0.5};
+    const Pose pose =
+      get_closest_centerline_pose({lanelet}, convertBasicPoint3dToPose(point, 0.0), vehicle_info);
+    EXPECT_NEAR(pose.position.x, 0.0, 1e-12);
+    // Interpolated between two points: {0.0, 0.0} and {sqrt(2)/2, 0.0}.
+    EXPECT_NEAR(pose.position.y, 0.5, 1e-12);
+    EXPECT_NEAR(pose.position.z, 0.0, 1e-12);
+  }
+}
+
+
+TEST(TestUtilityFunctions, get_closest_centerline_pose__between_points__diagonal_lanelet)
+{
+  auto lanelet = create_straightforward_lanelet(M_PI / 4.0, {0, 0});
+  auto vehicle_info = create_vehicle_info();
+  const auto SQRT2_2 = M_SQRT2;
+
+  {
+    const lanelet::Point3d point{lanelet::InvalId, SQRT2_2 / 2 + 0.2, SQRT2_2 / 2 - 0.2};
+    const Pose pose =
+      get_closest_centerline_pose({lanelet}, convertBasicPoint3dToPose(point, 0.0), vehicle_info);
+    // Interpolated between two points: {0.0, 0.0} and {sqrt(2)/2, 0.0}.
+    EXPECT_DOUBLE_EQ(pose.position.x, SQRT2_2 / 2);
+    EXPECT_DOUBLE_EQ(pose.position.y, SQRT2_2 / 2);
     EXPECT_DOUBLE_EQ(pose.position.z, 0.0);
   }
 }

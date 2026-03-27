@@ -139,22 +139,23 @@ geometry_msgs::msg::Pose get_closest_centerline_pose(
   const auto refined_center_line = lanelet::utils::generateFineCenterline(closest_lanelet, 1.0);
   closest_lanelet.setCenterline(refined_center_line);
 
-  const double lane_yaw = lanelet::utils::getLaneletAngle(closest_lanelet, point.position);
-
-  const auto nearest_idx = autoware::motion_utils::findNearestIndex(
-    convertCenterlineToPoints(closest_lanelet), point.position);
-  const auto nearest_point = closest_lanelet.centerline()[nearest_idx];
+  auto pose = lanelet::utils::getClosestCenterPose(closest_lanelet, point.position);
 
   // shift nearest point on its local y axis so that vehicle's right and left edges
   // would have approx the same clearance from road border
   const auto shift_length = (vehicle_info.right_overhang_m - vehicle_info.left_overhang_m) / 2.0;
-  const auto delta_x = -shift_length * std::sin(lane_yaw);
-  const auto delta_y = shift_length * std::cos(lane_yaw);
 
-  lanelet::BasicPoint3d refined_point(
-    nearest_point.x() + delta_x, nearest_point.y() + delta_y, nearest_point.z());
+  // Compute lateral shift for position.
+  {
+    const auto & orientation = pose.orientation;
+    Eigen::Quaterniond rotation{orientation.w, orientation.x, orientation.y, orientation.z};
+    Eigen::Vector3d lateral_delta = rotation * Eigen::Vector3d(0.0, shift_length, 0.0);
+    pose.position.x += lateral_delta.x();
+    pose.position.y += lateral_delta.y();
+    pose.position.z += lateral_delta.z();
+  }
 
-  return convertBasicPoint3dToPose(refined_point, lane_yaw);
+  return pose;
 }
 
 }  // namespace autoware::mission_planner_universe::lanelet2
