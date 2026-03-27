@@ -2,8 +2,11 @@
   ros__parameters:
     sync_queue_size: 20
     precision_threshold_to_judge_overlapped: 0.4
-    recall_threshold_to_judge_overlapped: 0.5
+    recall_threshold_to_judge_overlapped: 1.1 # More than 1.0 to disable recall check for overlapped objects.
     remove_overlapped_unknown_objects: true
+    separate_unknown_objects_from_known: true # If true, overlapped unknown objects are not removed but separated from known type objects.
+    separated_opening_distance: 0.1 # [m] The distance for morphological opening of separated objects, to filter out objects thin parts.
+    separated_min_area: 0.03 # [m^2] The minimum area of separated objects.
     base_link_frame_id: base_link
     priority_mode: 2  # PriorityMode::Confidence
     message_timeout_sec: 1.0

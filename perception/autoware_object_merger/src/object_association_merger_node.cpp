@@ -17,7 +17,7 @@
 
 #include "autoware/object_merger/object_association_merger_node.hpp"
 #include "autoware/object_recognition_utils/object_recognition_utils.hpp"
-#include "autoware_utils/geometry/geometry.hpp"
+#include <autoware_utils/geometry/alt_geometry.hpp>
 
 #include <Eigen/Core>
 #include <Eigen/Geometry>
@@ -32,10 +32,16 @@
 #include <utility>
 #include <vector>
 
+#include <boost/geometry/algorithms/buffer.hpp>
+#include <cmath>
+#include <autoware_utils/geometry/alt_geometry.hpp>
+
 using Label = autoware_perception_msgs::msg::ObjectClassification;
 
 namespace
 {
+namespace bg = boost::geometry;
+
 bool isUnknownObjectOverlapped(
   const autoware_perception_msgs::msg::DetectedObject & unknown_object,
   const autoware_perception_msgs::msg::DetectedObject & known_object,
@@ -59,6 +65,156 @@ bool isUnknownObjectOverlapped(
     autoware::object_recognition_utils::get2dGeneralizedIoU(unknown_object, known_object);
   return precision > precision_threshold || recall > recall_threshold ||
          generalized_iou > generalized_iou_threshold;
+}
+
+geometry_msgs::msg::Point calculatePolygonPosition(
+  const autoware_utils::Polygon2d & polygon)
+{
+  double min_x = std::numeric_limits<double>::max();
+  double max_x = std::numeric_limits<double>::lowest();
+  double min_y = std::numeric_limits<double>::max();
+  double max_y = std::numeric_limits<double>::lowest();
+
+  // Calculate min and max coordinates of the polygon
+  for (const auto & point : polygon.outer()) {
+    min_x = std::min(min_x, point.x());
+    max_x = std::max(max_x, point.x());
+    min_y = std::min(min_y, point.y());
+    max_y = std::max(max_y, point.y());
+  }
+
+  const auto length = max_x - min_x;
+  const auto width = max_y - min_y;
+
+  geometry_msgs::msg::Point position;
+  position.x = min_x + length / 2.0;
+  position.y = min_y + width / 2.0;
+
+  return position;
+}
+
+geometry_msgs::msg::Polygon polygon2dToFootprint(
+  const autoware_utils::Polygon2d & polygon, geometry_msgs::msg::Point position)
+{
+  geometry_msgs::msg::Polygon footprint;
+  footprint.points.resize(polygon.outer().size());
+  std::transform(
+    polygon.outer().begin(), polygon.outer().end(), footprint.points.begin(),
+    [&position](auto & polygon_point) {
+      geometry_msgs::msg::Point32 point32;
+      // Update the object's footprint to be relative to the object's position
+      point32.x = polygon_point.x() - position.x;
+      point32.y = polygon_point.y() - position.y;
+      return point32;
+    });
+  return footprint;
+}
+
+// Creates a extended / shrunk polygons by buffer_distance
+std::vector<autoware_utils::Polygon2d> bufferPolygon2d(
+  const autoware_utils::Polygon2d & polygon, const double buffer_distance)
+{
+  bg::strategy::buffer::distance_symmetric<double> distance_strategy(buffer_distance);
+  bg::strategy::buffer::join_miter join_strategy;
+  bg::strategy::buffer::end_flat end_strategy;
+  bg::strategy::buffer::side_straight side_strategy;
+  bg::strategy::buffer::point_square point_strategy;
+  std::vector<autoware_utils::Polygon2d> buffed_polygons;
+  bg::buffer(
+    polygon, buffed_polygons, distance_strategy, side_strategy, join_strategy, end_strategy,
+    point_strategy);
+  return buffed_polygons;
+}
+
+// Filters out too small and thin parts of the polygon by eroding and dilating it
+std::vector<autoware_utils::Polygon2d> filterPolygonThinParts(
+  const autoware_utils::Polygon2d & polygon, double buffer_distance, double min_area)
+{
+  std::vector<autoware_utils::Polygon2d> filtered_polygons;
+  // Erode and dilate the polygon to filter out thin parts
+  auto eroded_polygons = bufferPolygon2d(polygon, -buffer_distance);
+  for (auto & eroded_polygon : eroded_polygons) {
+    if (eroded_polygon.outer().empty()) {
+      continue;
+    }
+    auto opened_polygons = bufferPolygon2d(eroded_polygon, buffer_distance);
+    for (auto & opened_polygon : opened_polygons) {
+      auto polygon_area = std::abs(bg::area(opened_polygon));
+      if (polygon_area < min_area) {
+        continue;
+      }
+      // Check if the polygon is clockwise, if not, inverse it since Autoware Universe uses
+      // counter-clockwise
+      if (autoware_utils::is_clockwise(opened_polygon)) {
+        opened_polygon = autoware_utils::inverse_clockwise(opened_polygon);
+      }
+      filtered_polygons.push_back(opened_polygon);
+    }
+  }
+  return filtered_polygons;
+}
+
+/**
+ * @brief Subtracts the known object from the unknown object and returns the resulting objects.
+ *
+ * This function takes two detected objects (unknown and known), converts them to 2D polygons,
+ * and subtracts the known polygon from the unknown polygon. Result polygons are eroded and dilated
+ * to filter out extremely thin parts of polygons. It returns the resulting polygons as detected
+ * objects, filtering out any small polygons below a specified minimum area.
+ *
+ * @param unknown_object The detected object that label is unknown.
+ * @param known_object The detected object that label is known.
+ * @param buffer_distance The distance to morphologically open the known polygon to reduce the
+ * number of excessively thin polygon parts.
+ * @param min_area The minimum area threshold for the resulting polygons to be considered valid.
+ * @return A vector of detected objects representing the subtracted polygons.
+ */
+std::vector<autoware_perception_msgs::msg::DetectedObject> getSubtractedObjects2D(
+  const autoware_perception_msgs::msg::DetectedObject & unknown_object,
+  const autoware_perception_msgs::msg::DetectedObject & known_object, const double buffer_distance,
+  const double min_area)
+{
+  using autoware_utils::alt::ConvexPolygon2d;
+  // Convert DetectedObject to Polygon2d
+  const auto unknown_polygon = autoware_utils::to_polygon2d(unknown_object);
+  const auto known_polygon = autoware_utils::to_polygon2d(known_object);
+
+  // Check if unknown object is within known object
+  bool is_unknown_within_known = autoware_utils::within(
+    ConvexPolygon2d::create(unknown_polygon).value(),
+    ConvexPolygon2d::create(known_polygon).value());
+
+  // Additional check in case of boost geometry error. Should be fixed by upgrading boost version
+  // to >1.79 or by replacing boost geometry difference with self-implemented functions
+  // https://github.com/autowarefoundation/autoware.universe/issues/8128
+  if (is_unknown_within_known) {
+    return {};
+  }
+
+  // Subtract unknown polygon from known polygon
+  std::vector<autoware_utils::Polygon2d> not_overlapping_unknown_polygons;
+  bg::difference(unknown_polygon, known_polygon, not_overlapping_unknown_polygons);
+
+  // If unknown polygon is not overlapping with known polygon, return unknown object as it is
+  if (not_overlapping_unknown_polygons.empty()) {
+    return {unknown_object};
+  }
+
+  std::vector<autoware_perception_msgs::msg::DetectedObject> not_overlapping_unknown_objects;
+  for (auto & polygon : not_overlapping_unknown_polygons) {
+    auto opened_polygons = filterPolygonThinParts(polygon, buffer_distance, min_area);
+    for (auto & opened_polygon : opened_polygons) {
+      autoware_perception_msgs::msg::DetectedObject detected_object = unknown_object;
+      detected_object.kinematics.pose_with_covariance.pose.position =
+        calculatePolygonPosition(opened_polygon);
+      detected_object.kinematics.pose_with_covariance.pose.position.z =
+        unknown_object.kinematics.pose_with_covariance.pose.position.z;
+      detected_object.shape.footprint = polygon2dToFootprint(
+        opened_polygon, detected_object.kinematics.pose_with_covariance.pose.position);
+      not_overlapping_unknown_objects.push_back(detected_object);
+    }
+  }
+  return not_overlapping_unknown_objects;
 }
 }  // namespace
 
@@ -90,6 +246,10 @@ ObjectAssociationMergerNode::ObjectAssociationMergerNode(const rclcpp::NodeOptio
   priority_mode_ = static_cast<PriorityMode>(declare_parameter<int>("priority_mode"));
   sync_queue_size_ = declare_parameter<int>("sync_queue_size");
   remove_overlapped_unknown_objects_ = declare_parameter<bool>("remove_overlapped_unknown_objects");
+  separate_unknown_objects_from_known_ =
+    declare_parameter<bool>("separate_unknown_objects_from_known");
+  separated_opening_distance_ = declare_parameter<double>("separated_opening_distance");
+  separated_min_area_ = declare_parameter<double>("separated_min_area");
   overlapped_judge_param_.precision_threshold =
     declare_parameter<double>("precision_threshold_to_judge_overlapped");
   overlapped_judge_param_.recall_threshold =
@@ -230,6 +390,17 @@ void ObjectAssociationMergerNode::objectsCallback(
               overlapped_judge_param_.distance_threshold_map,
               overlapped_judge_param_.generalized_iou_threshold)) {
           is_overlapped = true;
+          if (separate_unknown_objects_from_known_) {
+            auto not_overlapped_objects = getSubtractedObjects2D(
+              unknown_object, known_object, separated_opening_distance_, separated_min_area_);
+            if (not_overlapped_objects.empty()) {
+              break;  // unknown object is within known object
+            }
+            output_msg.objects.reserve(output_msg.objects.size() + not_overlapped_objects.size());
+            std::move(
+              not_overlapped_objects.begin(), not_overlapped_objects.end(),
+              std::back_inserter(output_msg.objects));
+          }
           break;
         }
       }

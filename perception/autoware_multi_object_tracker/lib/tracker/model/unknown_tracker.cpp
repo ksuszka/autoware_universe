@@ -53,6 +53,9 @@ UnknownTracker::UnknownTracker(const rclcpp::Time & time, const types::DynamicOb
     autoware_utils::kmph2mps(60)  /* [m/s] maximum velocity, y */
   );
 
+  // Change tracker movement by zeroing object covariance
+  teleport_tracker_ = true;
+
   // Set initial state
   {
     using autoware_utils::xyzrpy_covariance_index::XYZRPY_COV_IDX;
@@ -121,6 +124,18 @@ bool UnknownTracker::predict(const rclcpp::Time & time)
   return motion_model_.predictState(time);
 }
 
+static void freezeObject(types::DynamicObject & object)
+{
+    using autoware_utils::xyzrpy_covariance_index::XYZRPY_COV_IDX;
+    // freeze tracker movement by zeroing object covariance
+    auto & pose_cov = object.pose_covariance;
+
+    pose_cov[XYZRPY_COV_IDX::X_X] = 0.0;
+    pose_cov[XYZRPY_COV_IDX::X_Y] = 0.0;
+    pose_cov[XYZRPY_COV_IDX::Y_Y] = 0.0;
+    pose_cov[XYZRPY_COV_IDX::Y_X] = 0.0;
+}
+
 bool UnknownTracker::measureWithPose(const types::DynamicObject & object)
 {
   // update motion model
@@ -159,7 +174,11 @@ bool UnknownTracker::measure(
   }
 
   // update object
-  measureWithPose(object);
+  types::DynamicObject updating_object = object;
+  if (teleport_tracker_) {
+    freezeObject(updating_object);
+  }
+  measureWithPose(updating_object);
 
   return true;
 }

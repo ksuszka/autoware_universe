@@ -34,7 +34,18 @@ class UnknownTracker : public Tracker
 private:
   rclcpp::Logger logger_;
 
+  struct EkfParams
+  {
+    double r_cov_x;
+    double r_cov_y;
+    double r_cov_vx;
+    double r_cov_vy;
+  } ekf_params_;
+
+
   object_model::ObjectModel object_model_ = object_model::unknown;
+
+  bool teleport_tracker_;
 
   CVMotionModel motion_model_;
   using IDX = CVMotionModel::IDX;

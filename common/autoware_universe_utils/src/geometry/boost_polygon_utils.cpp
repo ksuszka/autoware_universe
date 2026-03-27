@@ -172,7 +172,7 @@ Polygon2d toPolygon2d(
   }
 
   // NOTE: push back the first point in order to close polygon
-  if (!polygon.outer().empty()) {
+  if (!polygon.outer().empty() && polygon.outer().front() != polygon.outer().back()) {
     appendPointToPolygon(polygon, polygon.outer().front());
   }
 

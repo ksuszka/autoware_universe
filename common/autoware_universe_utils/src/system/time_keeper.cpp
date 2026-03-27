@@ -19,10 +19,26 @@
 
 #include <fmt/format.h>
 
+#include <chrono>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+namespace fmt
+{
+template <>
+struct formatter<std::thread::id> : formatter<std::string>
+{
+  template <typename FormatContext>
+  auto format(std::thread::id id, FormatContext & ctx)
+  {
+    std::ostringstream oss;
+    oss << id;
+    return formatter<std::string>::format(oss.str(), ctx);
+  }
+};
+}  // namespace fmt
 
 namespace autoware::universe_utils
 {
@@ -132,16 +148,22 @@ void TimeKeeper::add_reporter(rclcpp::Publisher<ProcessingTimeDetail>::SharedPtr
 
 void TimeKeeper::start_track(const std::string & func_name)
 {
+  const auto current_thread_id = std::this_thread::get_id();
+
   if (current_time_node_ == nullptr) {
     current_time_node_ = std::make_shared<ProcessingTimeNode>(func_name);
     root_node_ = current_time_node_;
-    root_node_thread_id_ = std::this_thread::get_id();
+    root_node_thread_id_ = current_thread_id;
   } else {
-    if (root_node_thread_id_ != std::this_thread::get_id()) {
-      const auto warning_msg = fmt::format(
-        "TimeKeeper::start_track({}) is called from a different thread. Ignoring the call.",
-        func_name);
-      RCLCPP_WARN(rclcpp::get_logger("TimeKeeper"), "%s", warning_msg.c_str());
+    if (root_node_thread_id_ != current_thread_id) {
+      RCLCPP_WARN_THROTTLE(
+        rclcpp::get_logger("TimeKeeper"), clock_, std::chrono::milliseconds(10000).count(), "%s",
+        fmt::format(
+          "TimeKeeper::start_track() for {} is called from thread({}), which is not the root "
+          "thread({}). "
+          "Ignoring the call.",
+          func_name, current_thread_id, root_node_thread_id_)
+          .c_str());
       return;
     }
     current_time_node_ = current_time_node_->add_child(func_name);

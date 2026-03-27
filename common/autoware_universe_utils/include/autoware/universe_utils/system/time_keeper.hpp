@@ -16,6 +16,7 @@
 
 #include "autoware/universe_utils/system/stop_watch.hpp"
 
+#include <rclcpp/clock.hpp>
 #include <rclcpp/publisher.hpp>
 
 #include <std_msgs/msg/string.hpp>
@@ -177,6 +178,8 @@ private:
 
   std::vector<std::function<void(const std::shared_ptr<ProcessingTimeNode> &)>>
     reporters_;  //!< Vector of functions for reporting the processing times
+
+  rclcpp::Clock clock_{RCL_ROS_TIME};
 };
 
 /**

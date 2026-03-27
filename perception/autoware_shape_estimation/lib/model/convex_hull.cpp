@@ -14,6 +14,9 @@
 
 #include "autoware/shape_estimation/model/convex_hull.hpp"
 
+#include "autoware_utils/geometry/boost_polygon_utils.hpp"
+
+#include <autoware_utils/geometry/boost_geometry.hpp>
 #include <opencv2/core/core.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -21,12 +24,20 @@
 #include <autoware_perception_msgs/msg/shape.hpp>
 #include <geometry_msgs/msg/point32.hpp>
 
+#include <boost/geometry/algorithms/centroid.hpp>
+#include <boost/geometry/algorithms/convex_hull.hpp>
+#include <boost/geometry/strategies/strategies.hpp>
+
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
 
 #include <algorithm>
 #include <vector>
+
+namespace bg = boost::geometry;
+using autoware_utils::Polygon2d;
+using Point2d = autoware_utils::Point2d;
 
 namespace autoware::shape_estimation
 {
@@ -59,28 +70,25 @@ bool ConvexHullShapeModel::estimate(
     max_z = std::max(point.z, max_z);
   }
 
-  std::vector<cv::Point> v_pointcloud;
-  std::vector<cv::Point> v_polygon_points;
+  Polygon2d bg_polygon;
   for (size_t i = 0; i < cluster.size(); ++i) {
-    v_pointcloud.push_back(
-      cv::Point((cluster.at(i).x - centroid.x) * 1000.0, (cluster.at(i).y - centroid.y) * 1000.0));
+    bg_polygon.outer().push_back(
+      Point2d((cluster.at(i).x - centroid.x), (cluster.at(i).y - centroid.y)));
   }
-  cv::convexHull(v_pointcloud, v_polygon_points);
-
-  pcl::PointXYZ polygon_centroid;
-  polygon_centroid.x = 0;
-  polygon_centroid.y = 0;
-  for (size_t i = 0; i < v_polygon_points.size(); ++i) {
-    polygon_centroid.x += static_cast<double>(v_polygon_points.at(i).x) / 1000.0;
-    polygon_centroid.y += static_cast<double>(v_polygon_points.at(i).y) / 1000.0;
+  Polygon2d convex_polygon;
+  bg::convex_hull(bg_polygon, convex_polygon);
+  // Check if the polygon is clockwise, if not, inverse it since Autoware Universe uses
+  // counter-clockwise
+  if (autoware_utils::is_clockwise(convex_polygon)) {
+    convex_polygon = autoware_utils::inverse_clockwise(convex_polygon);
   }
-  polygon_centroid.x = polygon_centroid.x / static_cast<double>(v_polygon_points.size());
-  polygon_centroid.y = polygon_centroid.y / static_cast<double>(v_polygon_points.size());
+  Point2d polygon_centroid;
+  bg::centroid(convex_polygon, polygon_centroid);
 
-  for (size_t i = 0; i < v_polygon_points.size(); ++i) {
+  for (size_t i = 0; i < convex_polygon.outer().size(); ++i) {
     geometry_msgs::msg::Point32 point;
-    point.x = static_cast<double>(v_polygon_points.at(i).x) / 1000.0 - polygon_centroid.x;
-    point.y = static_cast<double>(v_polygon_points.at(i).y) / 1000.0 - polygon_centroid.y;
+    point.x = static_cast<double>(convex_polygon.outer().at(i).x()) - polygon_centroid.x();
+    point.y = static_cast<double>(convex_polygon.outer().at(i).y()) - polygon_centroid.y();
     point.z = 0.0;
     shape_output.footprint.points.push_back(point);
   }
@@ -90,8 +98,8 @@ bool ConvexHullShapeModel::estimate(
   shape_output.dimensions.x = 0.0;
   shape_output.dimensions.y = 0.0;
   shape_output.dimensions.z = std::max((max_z - min_z), ep);
-  pose_output.position.x = centroid.x + polygon_centroid.x;
-  pose_output.position.y = centroid.y + polygon_centroid.y;
+  pose_output.position.x = centroid.x + polygon_centroid.x();
+  pose_output.position.y = centroid.y + polygon_centroid.y();
   pose_output.position.z = min_z + shape_output.dimensions.z * 0.5;
   pose_output.orientation.x = 0;
   pose_output.orientation.y = 0;
