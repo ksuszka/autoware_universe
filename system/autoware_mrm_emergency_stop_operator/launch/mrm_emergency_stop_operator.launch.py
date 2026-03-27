@@ -36,8 +36,7 @@ def launch_setup(context, *args, **kwargs):
         ],
         remappings=[
             ("~/input/mrm/emergency_stop/operate", "/system/mrm/emergency_stop/operate"),
-            # SDP-5412 In AS-Drive external cmd converter is not used. Disable input control command to perform emergency stop with straightened wheels
-            ("~/input/control/control_cmd", "/control/command/control_cmd_dummy"),
+            ("~/input/control/control_cmd", "/control/command/control_cmd"),
             ("~/output/mrm/emergency_stop/status", "/system/mrm/emergency_stop/status"),
             ("~/output/mrm/emergency_stop/control_cmd", "/system/emergency/control_cmd"),
         ],
