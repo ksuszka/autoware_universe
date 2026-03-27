@@ -187,13 +187,10 @@ void ControlValidator::setup_parameters()
   try {
     vehicle_info_ = autoware::vehicle_info_utils::VehicleInfoUtils(*this).getVehicleInfo();
   } catch (...) {
-    vehicle_info_.front_overhang_m = 0.5;
-    vehicle_info_.wheel_base_m = 4.0;
-    RCLCPP_ERROR(
-      get_logger(),
-      "failed to get vehicle info. use default value. vehicle_info_.front_overhang_m: %.2f, "
-      "vehicle_info_.wheel_base_m: %.2f",
-      vehicle_info_.front_overhang_m, vehicle_info_.wheel_base_m);
+    RCLCPP_ERROR(get_logger(), "Node '%s' couldn't load vehicle parameters.", 
+    get_name());
+
+    throw;
   }
 }
 

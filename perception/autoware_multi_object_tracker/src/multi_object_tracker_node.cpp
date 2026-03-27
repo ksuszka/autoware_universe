@@ -177,6 +177,7 @@ MultiObjectTracker::MultiObjectTracker(const rclcpp::NodeOptions & node_options)
         std::pow(declare_parameter<double>("distance_threshold", 5.0), 2.0);
 
       config.unknown_lifetime = declare_parameter<double>("unknown_lifetime", 0.5);
+      config.tentative_lifetime = declare_parameter<double>("tentative_lifetime", 0.3);
       config.min_object_removal_overlap =
         declare_parameter<double>("min_object_removal_overlap", 0.9);
       config.min_unknown_object_add_existence_prob =

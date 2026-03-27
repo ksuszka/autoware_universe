@@ -59,3 +59,4 @@
     # debug
     publish_debug_footprints: true # publish vehicle footprint & footprints with surround_check_distance and surround_check_recover_distance offsets
     debug_footprint_label: "car"
+    publish_debug_blocking_objects: false # don't publish debug message with objects that triggered the surround obstacle checker stop

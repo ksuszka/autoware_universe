@@ -58,6 +58,7 @@ bool PedestrianAndBicycleTracker::getTrackedObject(
   }
   object.uuid = object_.uuid;
   object.classification = object_.classification;
+  object.existence_probability = object_.existence_probability;
   return true;
 }
 

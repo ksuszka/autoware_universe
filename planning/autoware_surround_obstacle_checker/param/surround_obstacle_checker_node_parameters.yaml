@@ -55,3 +55,6 @@ surround_obstacle_checker_node:
     description: Select the label for debug footprint
     validation:
       one_of<>: [[pointcloud, unknown, car, truck, bus, trailer, motorcycle, bicycle, pedestrian]]
+  publish_debug_blocking_objects:
+    type: bool
+    description: Publish debug message with objects that triggered the surround obstacle checker stop

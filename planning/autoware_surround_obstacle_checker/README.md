@@ -92,6 +92,7 @@ As mentioned in stop condition section, it prevents chattering by changing thres
 | `~/output/max_velocity`                 | `autoware_internal_planning_msgs::msg::VelocityLimit`             | Velocity limit command                                                                |
 | `~/output/no_start_reason`              | `diagnostic_msgs::msg::DiagnosticStatus`                          | No start reason                                                                       |
 | `~/debug/marker`                        | `visualization_msgs::msg::MarkerArray`                            | Marker for visualization                                                              |
+| `~/debug/blocking_objects`              | `autoware_perception_msgs::msg::PredictedObjects`                 | Objects that triggered the surround obstacle checker stop            |
 | `~/debug/footprint`                     | `geometry_msgs::msg::PolygonStamped`                              | Ego vehicle base footprint for visualization                                          |
 | `~/debug/footprint_offset`              | `geometry_msgs::msg::PolygonStamped`                              | Ego vehicle footprint with `surround_check_distance` offset for visualization         |
 | `~/debug/footprint_recover_offset`      | `geometry_msgs::msg::PolygonStamped`                              | Ego vehicle footprint with `surround_check_recover_distance` offset for visualization |
@@ -111,6 +112,7 @@ As mentioned in stop condition section, it prevents chattering by changing thres
 | `stop_state_ego_speed`               | `double` | Threshold to check ego vehicle stopped [m/s]                                                                                                     | 0.1                                          |
 | `stop_state_entry_duration_time`     | `double` | Threshold to check ego vehicle stopped [s]                                                                                                       | 0.1                                          |
 | `publish_debug_footprints`           | `bool`   | Publish vehicle footprint with/without offsets                                                                                                   | `true`                                       |
+| `publish_debug_blocking_objects`     | `bool`   | Publish debug message with objects that triggered the surround obstacle checker stop                                                    | `false`                                      |
 
 ## Assumptions / Known limits
 

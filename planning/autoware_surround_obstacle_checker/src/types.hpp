@@ -26,6 +26,8 @@ struct StopObstacle
   double nearest_distance;
   Point nearest_point;
   UUID uuid;
+  autoware_perception_msgs::msg::PredictedObjects debug_blocking_objects;
+  std::vector<geometry_msgs::msg::Point> debug_blocking_points;
 };
 
 }  // namespace autoware::surround_obstacle_checker

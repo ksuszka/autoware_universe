@@ -178,10 +178,9 @@ void TrackerProcessor::spawn(
     }
 
     if (
-      new_object.existence_probability >= config_.min_unknown_object_add_existence_prob ||
-      (object_recognition_utils::getHighestProbLabel(new_object.classification) ==
-          Label::UNKNOWN &&
-        isLargerThanChild(new_object))) {
+      object_recognition_utils::getHighestProbLabel(new_object.classification) == Label::UNKNOWN &&
+      (isLargerThanChild(new_object) ||
+       new_object.existence_probability > config_.min_unknown_object_add_existence_prob)) {
       // Add object immediately to the trackers
       tracker->setTotalMeasurementCount(config_.confident_count_threshold.at(Label::UNKNOWN));
     }
@@ -239,6 +238,9 @@ void TrackerProcessor::removeOldTracker(const rclcpp::Time & time)
       // Limit the lifetime of UNKNOWN trackers to reduce the number of empty UNKNOWN trackers,
       // as they are spawned faster with the isLargerThanChild check.
       lifetime = config_.unknown_lifetime;
+    }
+    if (!isConfidentTracker(*itr)) {
+      lifetime = config_.tentative_lifetime;
     }
     is_old = lifetime < (*itr)->getElapsedTimeFromLastUpdate(time);
     // If the tracker is old, delete it
@@ -448,7 +450,8 @@ bool TrackerProcessor::isConfidentTracker(const std::shared_ptr<Tracker> & track
   auto label = tracker->getHighestProbLabel();
   return (
     tracker->getTotalMeasurementCount() >= config_.confident_count_threshold.at(label) ||
-    tracker->getTotalExistenceProbability() > config_.min_unknown_object_add_existence_prob);
+    (label == Label::UNKNOWN &&
+     tracker->getTotalExistenceProbability() > config_.min_unknown_object_add_existence_prob));
 }
 
 void TrackerProcessor::getTrackedObjects(

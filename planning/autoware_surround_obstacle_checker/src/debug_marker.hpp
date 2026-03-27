@@ -55,11 +55,13 @@ public:
 
   bool pushPose(const geometry_msgs::msg::Pose & pose, const PoseType & type);
   void pushStopObstacle(const std::optional<StopObstacle> & stop_obstacle);
+  void pushBlockingObstacle(const std::optional<StopObstacle> & stop_obstacle);
   void publish();
   void publishFootprints();
 
 private:
   rclcpp::Publisher<MarkerArray>::SharedPtr debug_viz_pub_;
+  rclcpp::Publisher<PredictedObjects>::SharedPtr debug_blocking_objects_pub_;
 
   rclcpp::Publisher<PolygonStamped>::SharedPtr vehicle_footprint_pub_;
   rclcpp::Publisher<PolygonStamped>::SharedPtr vehicle_footprint_offset_pub_;
@@ -81,6 +83,7 @@ private:
   PolygonStamped boostPolygonToPolygonStamped(const Polygon2d & boost_polygon, const double & z);
 
   std::optional<StopObstacle> stop_obstacle_;
+  std::optional<StopObstacle> blocking_obstacle_;
   std::shared_ptr<geometry_msgs::msg::Pose> stop_pose_ptr_;
   rclcpp::Clock::SharedPtr clock_;
 };

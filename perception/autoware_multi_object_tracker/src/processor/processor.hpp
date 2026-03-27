@@ -49,6 +49,7 @@ struct TrackerProcessorConfig
   std::map<LabelType, int> confident_count_threshold; // [count]
 
   double unknown_lifetime;
+  double tentative_lifetime;
   double min_object_removal_overlap;
   double min_unknown_object_add_existence_prob;
 

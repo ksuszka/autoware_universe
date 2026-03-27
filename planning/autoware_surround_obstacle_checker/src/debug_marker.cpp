@@ -80,6 +80,7 @@ SurroundObstacleCheckerDebugNode::SurroundObstacleCheckerDebugNode(
   clock_(clock)
 {
   debug_viz_pub_ = node.create_publisher<visualization_msgs::msg::MarkerArray>("~/debug/marker", 1);
+  debug_blocking_objects_pub_ = node.create_publisher<PredictedObjects>("~/debug/blocking_objects", 1);
   vehicle_footprint_pub_ = node.create_publisher<PolygonStamped>("~/debug/footprint", 1);
   vehicle_footprint_offset_pub_ =
     node.create_publisher<PolygonStamped>("~/debug/footprint_offset", 1);
@@ -103,6 +104,12 @@ void SurroundObstacleCheckerDebugNode::pushStopObstacle(
   const std::optional<StopObstacle> & stop_obstacle)
 {
   stop_obstacle_ = stop_obstacle;
+}
+
+void SurroundObstacleCheckerDebugNode::pushBlockingObstacle(
+  const std::optional<StopObstacle> & blocking_obstacle)
+{
+  blocking_obstacle_ = blocking_obstacle;
 }
 
 void SurroundObstacleCheckerDebugNode::publishFootprints()
@@ -158,6 +165,11 @@ void SurroundObstacleCheckerDebugNode::publish()
     safety_factors.factors.push_back(safety_factor);
   }
 
+  /* publish debug object causing stop */
+  if (blocking_obstacle_.has_value() && !blocking_obstacle_->debug_blocking_objects.objects.empty()) {
+    debug_blocking_objects_pub_->publish(blocking_obstacle_->debug_blocking_objects);
+  }
+
   /* publish stop reason for autoware api */
   if (stop_pose_ptr_ != nullptr) {
     planning_factor_interface_->add(
@@ -169,22 +181,37 @@ void SurroundObstacleCheckerDebugNode::publish()
   /* reset variables */
   stop_pose_ptr_ = nullptr;
   stop_obstacle_.reset();
+  blocking_obstacle_.reset();
 }
 
 MarkerArray SurroundObstacleCheckerDebugNode::makeVisualizationMarker()
 {
   MarkerArray msg;
   rclcpp::Time current_time = this->clock_->now();
+  int id = 0;
 
   // visualize surround object
   if (stop_obstacle_.has_value()) {
     auto marker = create_default_marker(
-      "map", current_time, "no_start_obstacle_text", 0, Marker::TEXT_VIEW_FACING,
+      "map", current_time, "no_start_obstacle_text", id++, Marker::TEXT_VIEW_FACING,
       create_marker_scale(0.0, 0.0, 1.0), create_marker_color(1.0, 1.0, 1.0, 0.999));
     marker.pose.position = stop_obstacle_.value().nearest_point;
     marker.pose.position.z += 2.0;  // add half of the heights of obj roughly
     marker.text = "!";
+    marker.lifetime = rclcpp::Duration::from_seconds(0.2);
     msg.markers.push_back(marker);
+  }
+
+  // visualize stop points
+  if (blocking_obstacle_.has_value()) {
+    for (const auto & point : blocking_obstacle_->debug_blocking_points) {
+      auto marker = create_default_marker(
+        "base_link", current_time, "no_start_obstacle_point", id++, Marker::SPHERE,
+        create_marker_scale(0.2, 0.2, 0.2), create_marker_color(1.0, 0.0, 0.0, 0.7));
+      marker.pose.position = point;
+      marker.lifetime = rclcpp::Duration::from_seconds(0.2);
+      msg.markers.push_back(marker);
+    }
   }
 
   return msg;

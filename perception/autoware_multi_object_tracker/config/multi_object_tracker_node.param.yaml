@@ -33,6 +33,7 @@
     # tracker parameters
     tracker_lifetime: 1.0  # [s]
     unknown_lifetime: 0.5  # [s]
+    tentative_lifetime: 0.3  # [s]
     min_known_object_removal_iou: 0.2  # [ratio]
     min_object_removal_overlap: 0.9 # [ratio]
     min_unknown_object_removal_iou_with_known: 0.2  # [ratio]

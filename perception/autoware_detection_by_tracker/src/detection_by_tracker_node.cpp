@@ -126,6 +126,22 @@ void DetectionByTracker::setMaxSearchRange()
   max_search_distance_for_divider_[Label::PEDESTRIAN] = 2.0;
 }
 
+void DetectionByTracker::removeCovarianceFromTrackedObjects(
+  autoware_perception_msgs::msg::DetectedObjects & objects)
+{
+  for (auto & object : objects.objects) {
+    std::fill(
+      object.kinematics.pose_with_covariance.covariance.begin(),
+      object.kinematics.pose_with_covariance.covariance.end(), 0.0);
+    object.kinematics.has_position_covariance = false;
+
+    std::fill(
+      object.kinematics.twist_with_covariance.covariance.begin(),
+      object.kinematics.twist_with_covariance.covariance.end(), 0.0);
+    object.kinematics.has_twist_covariance = false;
+  }
+}
+
 void DetectionByTracker::onObjects(const DetectedObjectsWithFeature::ConstSharedPtr input_msg)
 {
   debugger_->startMeasureProcessingTime();
@@ -148,6 +164,8 @@ void DetectionByTracker::onObjects(const DetectedObjectsWithFeature::ConstShared
     }
     // to simplify post processes, convert tracked_objects to DetectedObjects message.
     tracked_objects = autoware::object_recognition_utils::toDetectedObjects(transformed_objects);
+    
+    removeCovarianceFromTrackedObjects(tracked_objects);
   }
   debugger_->publishInitialObjects(*input_msg);
   debugger_->publishTrackedObjects(tracked_objects);

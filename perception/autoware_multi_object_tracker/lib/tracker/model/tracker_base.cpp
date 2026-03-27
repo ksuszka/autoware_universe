@@ -110,6 +110,8 @@ bool Tracker::updateWithMeasurement(
       channel_info.trust_existence_probability ? object.existence_probability : 0.6;
     total_existence_probability_ = updateProbability(
       total_existence_probability_, existence_probability, probability_false_detection);
+    // update object existence probability with the latest measurement
+    object_.existence_probability = object.existence_probability;
   }
 
   last_update_with_measurement_time_ = measurement_time;

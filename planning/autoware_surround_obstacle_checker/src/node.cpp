@@ -233,6 +233,9 @@ void SurroundObstacleCheckerNode::onTimer()
 
   if (state_ == State::STOP) {
     debug_ptr_->pushPose(odometry_ptr_->pose.pose, PoseType::NoStart);
+    if (param.publish_debug_blocking_objects && nearest_obstacle.has_value()) {
+      debug_ptr_->pushBlockingObstacle(nearest_obstacle);
+    }
   }
 
   autoware_internal_debug_msgs::msg::Float64Stamped processing_time_msg;
@@ -334,6 +337,9 @@ std::optional<StopObstacle> SurroundObstacleCheckerNode::getNearestObstacleByPoi
     obstacle.nearest_distance = minimum_distance;
     obstacle.nearest_point = nearest_point_map;
     obstacle.uuid = UUID();  // Default UUID
+    if (param.publish_debug_blocking_objects) {
+      obstacle.debug_blocking_points.push_back(nearest_point_base_link);
+    }
     return obstacle;
   }
   return std::nullopt;
@@ -387,6 +393,10 @@ std::optional<StopObstacle> SurroundObstacleCheckerNode::getNearestObstacleByDyn
     obstacle.nearest_distance = minimum_distance;
     obstacle.nearest_point = object_position;
     obstacle.uuid = nearest_object.object_id;
+    if (param.publish_debug_blocking_objects) {
+      obstacle.debug_blocking_objects.objects.push_back(nearest_object);
+      obstacle.debug_blocking_objects.header = object_ptr_->header;
+    }
     return obstacle;
   }
   return std::nullopt;

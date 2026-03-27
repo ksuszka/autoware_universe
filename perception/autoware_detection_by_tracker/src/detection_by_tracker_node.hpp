@@ -108,6 +108,9 @@ private:
 
   void setMaxSearchRange();
 
+  void removeCovarianceFromTrackedObjects(
+    autoware_perception_msgs::msg::DetectedObjects & objects);
+
   void onObjects(const DetectedObjectsWithFeature::ConstSharedPtr input_msg);
 
   void divideUnderSegmentedObjects(

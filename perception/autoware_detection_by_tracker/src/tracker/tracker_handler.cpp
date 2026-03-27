@@ -81,6 +81,8 @@ bool TrackerHandler::estimateTrackedObjects(
     const float yaw_hat = autoware_utils::normalize_radian(yaw + wz * dt.seconds());
     estimated_object.kinematics.pose_with_covariance.pose.orientation =
       autoware_utils::create_quaternion_from_yaw(yaw_hat);
+    estimated_object.kinematics.orientation_availability =
+      object.kinematics.orientation_availability;
     output.objects.push_back(estimated_object);
   }
   return true;

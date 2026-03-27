@@ -359,6 +359,11 @@
             "bicycle",
             "pedestrian"
           ]
+        },
+        "publish_debug_blocking_objects": {
+          "type": "boolean",
+          "description": "Publish debug message with objects that triggered the surround obstacle checker stop",
+          "default": "false"
         }
       },
       "required": [
@@ -375,7 +380,8 @@
         "state_clear_time",
         "stop_state_ego_speed",
         "publish_debug_footprints",
-        "debug_footprint_label"
+        "debug_footprint_label",
+        "publish_debug_blocking_objects"
       ],
       "additionalProperties": false
     }
