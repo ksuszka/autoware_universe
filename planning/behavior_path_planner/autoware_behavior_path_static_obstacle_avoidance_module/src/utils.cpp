@@ -29,6 +29,7 @@
 #include <boost/geometry/algorithms/buffer.hpp>
 #include <boost/geometry/algorithms/convex_hull.hpp>
 #include <boost/geometry/algorithms/correct.hpp>
+#include <boost/geometry/algorithms/intersection.hpp>
 #include <boost/geometry/algorithms/union.hpp>
 #include <boost/geometry/geometries/point_xy.hpp>
 
@@ -1118,78 +1119,134 @@ std::optional<double> getAvoidMargin(
  * @param object data.
  * @param avoidance module data, which includes current reference path.
  * @param planner data, which includes ego vehicle footprint info.
+ * @param parameters for margin calculation.
  * @return if this function finds there is no enough space to avoid, return nullopt.
  */
 double getRoadShoulderDistance(
   ObjectData & object, const AvoidancePlanningData & data,
-  const std::shared_ptr<const PlannerData> & planner_data)
+  const std::shared_ptr<const PlannerData> & planner_data,
+  const std::shared_ptr<AvoidanceParameters> & parameters)
 {
-  using autoware_utils::Point2d;
-  using lanelet::utils::to2D;
 
   const auto object_closest_index =
     autoware::motion_utils::findNearestIndex(data.reference_path.points, object.getPosition());
-  const auto object_closest_pose = data.reference_path.points.at(object_closest_index).point.pose;
+  const auto & object_closest_pose =
+    data.reference_path.points.at(object_closest_index).point.pose;
 
   const auto rh = planner_data->route_handler;
   if (!rh->getClosestLaneletWithinRoute(object_closest_pose, &object.overhang_lanelet)) {
     return 0.0;
   }
 
+  if (object.overhang_points.empty()) {
+    return 0.0;
+  }
+
+  const bool on_right = isOnRight(object);
   const auto centerline_pose =
-    lanelet::utils::getClosestCenterPose(object.overhang_lanelet, object.getPosition());
-  // TODO(Satoshi OTA): check if the basic point is on right or left of bound.
-  const auto bound = isOnRight(object) ? data.left_bound : data.right_bound;
-  const auto envelope_polygon_width = boost::geometry::area(object.envelope_poly) /
-                                      std::max(object.length, 1e-3);  // prevent division by zero
+  lanelet::utils::getClosestCenterPose(object.overhang_lanelet, object.getPosition());
+  const auto & bound = on_right ? data.left_bound : data.right_bound;
+  if (bound.empty()) {
+    return 0.0;
+  }
+  const Point & face_pt = object.overhang_points.front().second;
+  const Pose face_pose = geometry_msgs::build<Pose>()
+    .position(face_pt)
+    .orientation(centerline_pose.orientation);
 
-  std::vector<std::tuple<double, Point, Point>> intersects;
-  for (const auto & p1 : object.overhang_points) {
-    const auto p_tmp =
-      geometry_msgs::build<Pose>().position(p1.second).orientation(centerline_pose.orientation);
-    for (size_t i = 1; i < bound.size(); i++) {
-      {
-        const auto p2 =
-          calc_offset_pose(p_tmp, 0.0, (isOnRight(object) ? 100.0 : -100.0), 0.0).position;
-        const auto opt_intersect =
-          autoware_utils::intersect(p1.second, p2, bound.at(i - 1), bound.at(i));
+  struct {
+    double dist = std::numeric_limits<double>::infinity();
+    Point src{};
+    Point dst{};
 
-        if (opt_intersect.has_value()) {
-          intersects.emplace_back(
-            calc_distance2d(p1.second, opt_intersect.value()), p1.second, opt_intersect.value());
-          break;
-        }
+    void try_update(const double dist, const Point & src, const Point & dst)
+    {
+      if (dist >= this->dist) return;
+      this->dist = dist;
+      this->src = src;
+      this->dst = dst;
+    }
+  } min_gap;
+
+  // (1) Bound-vertex lateral sampling along the object's longitudinal footprint.
+  //
+  // For every bound vertex that falls (longitudinally) within the envelope arc range,
+  // measure the lateral gap from most laterally shifted point of an objact (face_pt) to that vertex.
+  // This catches indentations anywhere along the object's length — e.g. a bus-clipped bound that locally narrows
+  // the drivable area, even if the indent doesn't line up with face_pt.
+  {
+    const auto object_type = utils::getHighestProbLabel(object.object.classification);
+    const auto object_parameter = parameters->object_parameters.at(object_type);
+    const auto lateral_hard_margin = object.is_parked
+      ? object_parameter.lateral_hard_margin_for_parked_vehicle
+      : object_parameter.lateral_hard_margin;
+    const double k_arc_margin =
+      lateral_hard_margin + object_parameter.envelope_buffer_margin;
+
+    // Compute envelope arc range once.
+    double env_arc_min = std::numeric_limits<double>::max();
+    double env_arc_max = std::numeric_limits<double>::lowest();
+    for (const auto & p : object.envelope_poly.outer()) {
+      const auto pt = autoware_utils::create_point(p.x(), p.y(), 0.0);
+      const auto pt_idx =
+        autoware::motion_utils::findNearestIndex(data.reference_path.points, pt);
+      const auto arc = autoware::motion_utils::calcSignedArcLength(
+        data.reference_path.points, object_closest_index, pt_idx);
+      env_arc_min = std::min(env_arc_min, arc);
+      env_arc_max = std::max(env_arc_max, arc);
+    }
+
+    // Iterate over bound vertices and find the minimum lateral distance within the arc window.
+    for (size_t i = 0; i < bound.size(); ++i) {
+      const auto bp_idx =
+        autoware::motion_utils::findNearestIndex(data.reference_path.points, bound[i]);
+      const auto arc_rel = autoware::motion_utils::calcSignedArcLength(
+        data.reference_path.points, object_closest_index, bp_idx);
+
+      if (arc_rel < env_arc_min - k_arc_margin || arc_rel > env_arc_max + k_arc_margin) {
+        continue;
       }
-      {
-        const auto p2 =
-          calc_offset_pose(
-            p_tmp, 0.0, (isOnRight(object) ? -0.5 : 0.5) * envelope_polygon_width, 0.0)
-            .position;
-        const auto opt_intersect =
-          autoware_utils::intersect(p1.second, p2, bound.at(i - 1), bound.at(i));
 
-        if (opt_intersect.has_value()) {
-          intersects.emplace_back(
-            -1.0 * calc_distance2d(p1.second, opt_intersect.value()), p1.second,
-            opt_intersect.value());
-          break;
-        }
+      const double lat  = calc_lateral_deviation(face_pose, bound[i]);
+      const double dist = on_right ? lat : -lat;
+      if (std::abs(dist) > 1e-3) {
+        min_gap.try_update(dist, face_pt, bound[i]);
       }
     }
   }
 
-  std::sort(intersects.begin(), intersects.end(), [](const auto & a, const auto & b) {
-    return std::get<0>(a) < std::get<0>(b);
-  });
+  // (2) Perpendicular ray from face_pt through all bound segments.
+  //
+  // A single spanning ray always finds the boundary at the face point's position,
+  // regardless of how sparse or clipped the bound is.
+  // This is the fallback that guarantees a result even when (1) finds zero vertices
+  // inside the arc window.
+  {
+    constexpr double in_ray_reach = 5.0;
+    constexpr double out_ray_reach = 10.0;
 
-  if (intersects.empty()) {
+    const auto ray_inward =
+      calc_offset_pose(face_pose, 0.0, on_right ? -in_ray_reach : in_ray_reach, 0.0).position;
+    const auto ray_outward =
+      calc_offset_pose(face_pose, 0.0, on_right ? out_ray_reach : -out_ray_reach, 0.0).position;
+
+    for (size_t i = 1; i < bound.size(); ++i) {
+      if (const auto hit = autoware_utils::intersect(ray_inward, ray_outward, bound[i - 1], bound[i])) {
+        const bool hit_is_left = calc_lateral_deviation(face_pose, *hit) > 0.0;
+        const double signed_dist =
+          calc_distance2d(face_pt, *hit) * ((hit_is_left == on_right) ? 1.0 : -1.0);
+        min_gap.try_update(signed_dist, face_pt, *hit);
+      }
+    }
+  }
+
+  if (std::isinf(min_gap.dist)) {
     return 0.0;
   }
 
-  object.narrowest_place =
-    std::make_pair(std::get<1>(intersects.front()), std::get<2>(intersects.front()));
-
-  return std::get<0>(intersects.front());
+  // Store the narrowest gap endpoints for debug visualisation.
+  object.narrowest_place = std::make_pair(min_gap.src, min_gap.dst);
+  return min_gap.dist;
 }
 }  // namespace filtering_utils
 
@@ -1331,6 +1388,9 @@ bool isShiftNecessary(const bool & is_object_on_right, const double & shift_leng
 
 bool isSameDirectionShift(const bool & is_object_on_right, const double & shift_length)
 {
+  if (std::abs(shift_length) < 1e-3) {
+    return false;
+  }
   return (is_object_on_right == std::signbit(shift_length));
 }
 
@@ -1567,10 +1627,42 @@ Polygon2d createEnvelopePolygon(
   return expanded_polygon;
 }
 
-Polygon2d createEnvelopePolygon(
-  const ObjectData & object_data, const Pose & closest_pose, const double envelope_buffer)
+Polygon2d clipObjectPolygonByLanelet(
+  const Polygon2d & object_polygon, const lanelet::ConstLanelet & lanelet, const double buffer)
 {
-  const auto object_polygon = autoware_utils::to_polygon2d(object_data.object);
+  const auto & lane_bp = lanelet.polygon2d().basicPolygon();
+  if (lane_bp.empty()) {
+    return object_polygon;
+  }
+
+  autoware_utils::Polygon2d lane_poly;
+  for (const auto & lp : lane_bp) {
+    lane_poly.outer().push_back(autoware_utils::Point2d(lp.x(), lp.y()));
+  }
+  boost::geometry::correct(lane_poly);
+  const autoware_utils::Polygon2d lane_poly_expanded =
+    autoware_utils::expand_polygon(lane_poly, buffer);
+
+  std::vector<autoware_utils::Polygon2d> clipped;
+  boost::geometry::intersection(object_polygon, lane_poly_expanded, clipped);
+  if (!clipped.empty()) {
+    return clipped.front();
+  }
+
+  return object_polygon;
+}
+
+Polygon2d createEnvelopePolygon(
+  const ObjectData & object_data, const Pose & closest_pose, const double envelope_buffer,
+  const bool use_lanelet_for_clipping)
+{
+  auto object_polygon = autoware_utils::to_polygon2d(object_data.object);
+
+  if (use_lanelet_for_clipping) {
+    object_polygon = clipObjectPolygonByLanelet(
+      object_polygon, object_data.overhang_lanelet, envelope_buffer);
+  }
+
   return createEnvelopePolygon(object_polygon, closest_pose, envelope_buffer);
 }
 
@@ -1704,6 +1796,7 @@ void fillObjectEnvelopePolygon(
 
   const auto & envelope_buffer_margin =
     object_parameter.envelope_buffer_margin * object_data.distance_factor;
+  const auto use_lanelet_for_clipping = parameters->use_lanelet_for_clipping;
 
   const auto id = object_data.object.object_id;
   const auto same_id_obj = std::find_if(
@@ -1712,14 +1805,14 @@ void fillObjectEnvelopePolygon(
 
   if (same_id_obj == registered_objects.end()) {
     object_data.envelope_poly =
-      createEnvelopePolygon(object_data, closest_pose, envelope_buffer_margin);
+      createEnvelopePolygon(object_data, closest_pose, envelope_buffer_margin, use_lanelet_for_clipping);
     object_data.error_eclipse_max =
       calcErrorEclipseLongRadius(object_data.object.kinematics.initial_pose_with_covariance);
     return;
   }
 
   const auto one_shot_envelope_poly =
-    createEnvelopePolygon(object_data, closest_pose, envelope_buffer_margin);
+    createEnvelopePolygon(object_data, closest_pose, envelope_buffer_margin, use_lanelet_for_clipping);
   const double error_eclipse_long_radius =
     calcErrorEclipseLongRadius(object_data.object.kinematics.initial_pose_with_covariance);
 
@@ -1827,7 +1920,7 @@ void fillObjectMovingTime(
   object_data.stop_time = 0.0;
   object_data.init_pose = object_data.getPose();
 
-  if (object_data.move_time > object_parameter.moving_time_threshold  || object_pose_changed) {
+  if (object_data.move_time > object_parameter.moving_time_threshold || object_pose_changed) {
     stopped_objects.erase(same_id_obj);
   }
 }
@@ -1968,6 +2061,7 @@ void compensateLostTargetObjects(
     auto object_copy = stored_object;
     utils::static_obstacle_avoidance::fillLongitudinalAndLengthByClosestEnvelopeFootprint(
       data.reference_path_rough, ego_pos, object_copy);
+    object_copy.info = ObjectInfo::LOST_OBJECT;
 
     data.target_objects.push_back(object_copy);
   }
@@ -2087,11 +2181,27 @@ void updateRoadShoulderDistance(
   AvoidancePlanningData & data, const std::shared_ptr<const PlannerData> & planner_data,
   const std::shared_ptr<AvoidanceParameters> & parameters)
 {
+  const auto & ego_pos = planner_data->self_odometry->pose.pose.position;
   ObjectDataArray clip_objects;
   std::for_each(data.other_objects.begin(), data.other_objects.end(), [&](const auto & object) {
     if (!filtering_utils::isMovingObject(object, parameters)) {
+      // skip distant objects behind the ego vehicle
+      double lon_max = std::numeric_limits<double>::lowest();
+      for (const auto & p : object.envelope_poly.outer()) {
+        const auto pt = autoware_utils::create_point(p.x(), p.y(), 0.0);
+        const auto arc =
+          autoware::motion_utils::calcSignedArcLength(data.reference_path_rough.points, ego_pos, pt);
+        lon_max = std::max(lon_max, arc);
+      }
+      if (lon_max < -parameters->object_check_backward_distance) {
+        return;
+      }
       clip_objects.push_back(object);
     }
+  });
+
+  std::for_each(data.target_objects.begin(), data.target_objects.end(), [&](const auto & object) {
+    clip_objects.push_back(object);
   });
 
   if (clip_objects.empty()) return;
@@ -2107,7 +2217,7 @@ void updateRoadShoulderDistance(
     o.avoid_margin = lateral_hard_margin + 0.5 * vehicle_width;
   }
   const auto extract_obstacles = generateObstaclePolygonsForDrivableArea(
-    clip_objects, parameters, planner_data->parameters.vehicle_width / 2.0);
+    clip_objects, parameters, planner_data->parameters.vehicle_width);
 
   auto tmp_path = data.reference_path;
   tmp_path.left_bound = data.left_bound;
@@ -2118,7 +2228,7 @@ void updateRoadShoulderDistance(
   data.right_bound = tmp_path.right_bound;
 
   for (auto & o : data.target_objects) {
-    o.to_road_shoulder_distance = filtering_utils::getRoadShoulderDistance(o, data, planner_data);
+    o.to_road_shoulder_distance = filtering_utils::getRoadShoulderDistance(o, data, planner_data, parameters);
     o.avoid_margin = filtering_utils::getAvoidMargin(o, planner_data, parameters);
   }
 }
@@ -2162,7 +2272,7 @@ void filterTargetObjects(
     o.curvature_based_margin = calc_curvature_based_margin(
       o, data.front_corner_offsets, data.reference_path_rough, ego_pos,
       planner_data->parameters.vehicle_info.max_longitudinal_offset_m);
-    o.to_road_shoulder_distance = filtering_utils::getRoadShoulderDistance(o, data, planner_data);
+    o.to_road_shoulder_distance = filtering_utils::getRoadShoulderDistance(o, data, planner_data, parameters);
 
     if (filtering_utils::isUnknownTypeObject(o)) {
       if (o.is_classification_unstable) {

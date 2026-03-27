@@ -127,11 +127,17 @@ public:
     const SHIFT_TYPE type = SHIFT_TYPE::SPLINE) const;
 
   /**
-   * @brief Remove behind shift points and add the removed offset to the base_offset_.
-   * @details The previous offset information is stored in the base_offset_.
-   *          This should be called after generate().
+   * @brief Remove shift points whose end is behind ego and update base_offset_.
+   * @details A shift line is removed when end_idx + margin_idx <= nearest_idx.
+   *          At the default margin_idx=0 this removes the line as soon as its end
+   *          passes ego. For margin_idx > 0 the line is kept for that many additional
+   *          path steps, preserving the spline transition inside the backward path
+   *          window and preventing path-behind-ego snap-back.
+   * @param nearest_idx ego index on the reference path.
+   * @param margin_idx extra index steps to delay removal past end_idx (default 0).
    */
-  void removeBehindShiftLineAndSetBaseOffset(const size_t nearest_idx);
+  void removeBehindShiftLineAndSetBaseOffset(
+    const size_t nearest_idx, const size_t margin_idx = 0);
 
   double getLastShiftLength() const;
 

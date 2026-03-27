@@ -504,7 +504,12 @@ private:
   void postProcess() override
   {
     const size_t idx = planner_data_->findEgoIndex(path_shifter_.getReferencePath().points);
-    path_shifter_.removeBehindShiftLineAndSetBaseOffset(idx);
+    const size_t margin_idx = parameters_->keep_shift_line_in_backward_path
+      ? static_cast<size_t>(std::ceil(
+          planner_data_->parameters.backward_path_length /
+          parameters_->resample_interval_for_planning))
+      : 0;
+    path_shifter_.removeBehindShiftLineAndSetBaseOffset(idx, margin_idx);
   }
 
   struct RegisteredShiftLine

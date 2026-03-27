@@ -469,14 +469,17 @@ void PathShifter::sort_shift_lines_along_path(ShiftLineArray & shift_lines) cons
   RCLCPP_DEBUG(logger_, "PathShifter::sortShiftLinesAlongPath end.");
 }
 
-void PathShifter::removeBehindShiftLineAndSetBaseOffset(const size_t nearest_idx)
+void PathShifter::removeBehindShiftLineAndSetBaseOffset(
+  const size_t nearest_idx, const size_t margin_idx)
 {
-  // If shift_line.end is behind the ego_pose, remove the shift_line and
-  // set its shift_length to the base_offset.
+  // Remove a shift line when its end is at least margin_idx steps behind ego:
+  //   end_idx + margin_idx <= nearest_idx
+  // At margin_idx=0 (default) this is the original behaviour: remove as soon as end passes ego.
   ShiftLineArray new_shift_lines;
   ShiftLineArray removed_shift_lines;
   for (const auto & sl : shift_lines_) {
-    (sl.end_idx > nearest_idx) ? new_shift_lines.push_back(sl) : removed_shift_lines.push_back(sl);
+    const bool is_in_front_of = (sl.end_idx + margin_idx > nearest_idx);
+    is_in_front_of ? new_shift_lines.push_back(sl) : removed_shift_lines.push_back(sl);
   }
 
   double new_base_offset = base_offset_;
@@ -493,7 +496,8 @@ void PathShifter::removeBehindShiftLineAndSetBaseOffset(const size_t nearest_idx
   }
 
   RCLCPP_DEBUG(
-    logger_, "shift_lines size: %lu -> %lu", shift_lines_.size(), new_shift_lines.size());
+    logger_, "shift_lines size: %lu -> %lu (margin_idx=%lu)",
+    shift_lines_.size(), new_shift_lines.size(), margin_idx);
 
   setShiftLines(new_shift_lines);
 

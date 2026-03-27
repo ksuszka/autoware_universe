@@ -1410,15 +1410,20 @@ void ShiftLineGenerator::updateRegisteredRawShiftLines(const AvoidancePlanningDa
   };
 
   const auto ego_idx = data.ego_closest_path_index;
+  const size_t behind_margin_idx = parameters_->keep_shift_line_in_backward_path
+    ? static_cast<size_t>(std::ceil(
+        data_->parameters.backward_path_length /
+        parameters_->resample_interval_for_planning))
+    : 0;
 
   for (const auto & s : raw_registered_) {
     // invalid
-    if (s.end_idx < ego_idx) {
+    if ((s.end_idx + behind_margin_idx) < ego_idx) {
       continue;
     }
 
     // invalid
-    if (has_large_offset(s)) {
+    if (s.end_idx > ego_idx && has_large_offset(s)) {
       continue;
     }
 

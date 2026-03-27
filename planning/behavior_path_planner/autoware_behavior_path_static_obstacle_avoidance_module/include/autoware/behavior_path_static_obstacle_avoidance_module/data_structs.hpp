@@ -68,6 +68,7 @@ enum class ObjectInfo {
   INVALID_SHIFT_LINE,
   // others
   AMBIGUOUS_STOPPED_VEHICLE,
+  LOST_OBJECT,
 };
 
 struct ObjectParameter
@@ -161,6 +162,9 @@ struct AvoidanceParameters
 
   // lower distance for envelope polygon expansion.
   double lower_distance_for_polygon_expansion{0.0};
+
+  // if true, the object polygon is clipped by the lanelet before creating the envelope polygon.
+  bool use_lanelet_for_clipping{true};
 
   // Vehicles whose distance to the center of the path is
   // less than this will not be considered for avoidance.
@@ -326,6 +330,10 @@ struct AvoidanceParameters
 
   // path generation method.
   std::string path_generation_method{"shift_line_base"};
+
+  // When true, a completed shift line is kept in PathShifter until its end is
+  // backward_path_length behind ego instead of being removed immediately.
+  bool keep_shift_line_in_backward_path{true};
 
   // target velocity matrix
   std::vector<double> velocity_map;

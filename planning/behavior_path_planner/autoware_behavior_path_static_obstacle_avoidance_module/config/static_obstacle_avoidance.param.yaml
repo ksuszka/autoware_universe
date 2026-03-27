@@ -109,6 +109,7 @@
         lower_distance_for_polygon_expansion: 30.0      # [m] FOR DEVELOPER
         upper_distance_for_polygon_expansion: 100.0     # [m] FOR DEVELOPER
         object_pose_change_threshold: 0.15              # [m] FOR DEVELOPER
+        use_lanelet_for_clipping: false                  # [-] FOR DEVELOPER
 
       # For target object filtering
       target_filtering:
@@ -326,6 +327,12 @@
       #                      However, user can't control avoidance manuever execution.
       # "both"             : Use both method.
       path_generation_method: "shift_line_base"
+
+      # If true, a completed shift line is kept in PathShifter until its end is
+      # backward_path_length behind ego. This prevents the path behind ego from sudden
+      # changes immediately after passing the shift end, which could cause
+      # visible jumps in the forward planned path due to replanning.
+      keep_shift_line_in_backward_path: true
 
       shift_line_pipeline:
         trim:

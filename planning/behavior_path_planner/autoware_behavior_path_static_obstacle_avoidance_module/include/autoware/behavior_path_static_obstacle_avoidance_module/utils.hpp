@@ -154,6 +154,16 @@ Polygon2d createEnvelopePolygon(
   const Polygon2d & object_polygon, const Pose & closest_pose, const double envelope_buffer);
 
 /**
+ * @brief clip an object polygon to the region of a lanelet expanded by buffer.
+ * @param object_polygon the object's 2-D polygon.
+ * @param lanelet the lanelet used as the clipping mask.
+ * @param buffer expansion applied to the lanelet before clipping.
+ * @return the clipped polygon, or the original if the lanelet is empty or the intersection fails.
+ */
+Polygon2d clipObjectPolygonByLanelet(
+  const Polygon2d & object_polygon, const lanelet::ConstLanelet & lanelet, const double buffer);
+
+/**
  * @brief create envelope polygon which is parallel to current path.
  * @param object data.
  * @param closest point pose of the current path.
@@ -161,7 +171,8 @@ Polygon2d createEnvelopePolygon(
  * @return envelope polygon.
  */
 Polygon2d createEnvelopePolygon(
-  const ObjectData & object_data, const Pose & closest_pose, const double envelope_buffer);
+  const ObjectData & object_data, const Pose & closest_pose, const double envelope_buffer,
+  const bool use_lanelet_for_clipping = true);
 
 /**
  * @brief create data structs which are used in clipping drivable area process.

@@ -41,6 +41,8 @@ AvoidanceParameters getParameter(rclcpp::Node * node)
       get_or_declare_parameter<double>(*node, ns + "resample_interval_for_output");
     p.path_generation_method =
       get_or_declare_parameter<std::string>(*node, ns + "path_generation_method");
+    p.keep_shift_line_in_backward_path =
+      get_or_declare_parameter<bool>(*node, ns + "keep_shift_line_in_backward_path");
   }
 
   // drivable area
@@ -94,6 +96,8 @@ AvoidanceParameters getParameter(rclcpp::Node * node)
       get_or_declare_parameter<double>(*node, ns + "upper_distance_for_polygon_expansion");
     p.object_pose_change_threshold =
       get_or_declare_parameter<double>(*node, ns + "object_pose_change_threshold");
+    p.use_lanelet_for_clipping =
+      get_or_declare_parameter<bool>(*node, ns + "use_lanelet_for_clipping");
   }
 
   // target filtering

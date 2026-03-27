@@ -474,6 +474,9 @@ ObjectData StaticObstacleAvoidanceModule::createObjectData(
     std::clamp(calc_distance2d(getEgoPose(), object_pose) - lower, 0.0, upper) / upper;
   object_data.distance_factor = object_parameter.max_expand_ratio * clamp + 1.0;
 
+  planner_data_->route_handler->getClosestLaneletWithinRoute(
+    object_closest_pose, &object_data.overhang_lanelet);
+
   // Calc envelop polygon.
   utils::static_obstacle_avoidance::fillObjectEnvelopePolygon(
     object_data, stored_objects_, object_closest_pose, parameters_);
@@ -647,6 +650,9 @@ void StaticObstacleAvoidanceModule::fillEgoStatus(
     [&](const std::string & direction, const RegisteredShiftLineArray & shift_line_array) {
       return std::any_of(
         shift_line_array.begin(), shift_line_array.end(), [&](const auto & shift_line) {
+          if (!rtc_interface_ptr_map_.at(direction)->isRegistered(shift_line.uuid)) {
+            return false;
+          }
           return rtc_interface_ptr_map_.at(direction)->isForceDeactivated(shift_line.uuid);
         });
     };
@@ -708,6 +714,9 @@ void StaticObstacleAvoidanceModule::fillEgoStatus(
     [&](const std::string & direction, const RegisteredShiftLineArray & shift_line_array) {
       return std::any_of(
         shift_line_array.begin(), shift_line_array.end(), [&](const auto & shift_line) {
+          if (!rtc_interface_ptr_map_.at(direction)->isRegistered(shift_line.uuid)) {
+            return false;
+          }
           return rtc_interface_ptr_map_.at(direction)->isForceActivated(shift_line.uuid);
         });
     };
@@ -1217,7 +1226,7 @@ BehaviorModuleOutput StaticObstacleAvoidanceModule::plan()
       parameters_->path_generation_method == "both") {
       current_drivable_area_info.obstacles =
         utils::static_obstacle_avoidance::generateObstaclePolygonsForDrivableArea(
-          clip_objects_, parameters_, planner_data_->parameters.vehicle_width / 2.0);
+          clip_objects_, parameters_, planner_data_->parameters.vehicle_width);
     }
 
     output.drivable_area_info = utils::combineDrivableAreaInfo(
