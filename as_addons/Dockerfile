@@ -51,13 +51,13 @@ FROM base as downloader
 ARG TIMESTAMP
 
 # Setup ssh and download external source repositories
-COPY build_depends.repos /work/autoware.universe.build_depends.repos
+COPY build_depends_humble.repos /work/autoware.universe.build_depends_humble.repos
 RUN --mount=type=ssh \
   echo "BUILD(downloader): Downloading external sources..." \
   && mkdir -p -m 600 $HOME/.ssh \
   && ssh-keyscan gitlab.asystems.io >> ~/.ssh/known_hosts \
   && mkdir src \
-  && vcs import --recursive src < /work/autoware.universe.build_depends.repos \
+  && vcs import --recursive src < /work/autoware.universe.build_depends_humble.repos \
   && rm -rf ~/.ssh/
 
 # Add current repository to sources
