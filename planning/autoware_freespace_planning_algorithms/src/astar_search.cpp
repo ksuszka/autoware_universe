@@ -22,8 +22,14 @@
 #include <tf2/LinearMath/Transform.hpp>
 #include <tf2/utils.hpp>
 
+#include <visualization_msgs/msg/marker_array.hpp>
+
+#include <fmt/core.h>
+
+#include <array>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <queue>
 #include <utility>
 
@@ -68,10 +74,12 @@ Pose calcRelativePose(const Pose & base_pose, const Pose & pose)
 
 AstarSearch::AstarSearch(
   const PlannerCommonParam & planner_common_param, const VehicleShape & collision_vehicle_shape,
-  const AstarParam & astar_param)
+  const AstarParam & astar_param,
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr debug_publisher)
 : AbstractPlanningAlgorithm(
     planner_common_param, std::make_shared<rclcpp::Clock>(RCL_ROS_TIME), collision_vehicle_shape),
   astar_param_(astar_param),
+  debug_marker_pub_(debug_publisher),
   goal_node_(nullptr),
   use_reeds_shepp_(true)
 {
@@ -95,9 +103,11 @@ AstarSearch::AstarSearch(
 
 AstarSearch::AstarSearch(
   const PlannerCommonParam & planner_common_param, const VehicleShape & collision_vehicle_shape,
-  const AstarParam & astar_param, const rclcpp::Clock::SharedPtr & clock)
+  const AstarParam & astar_param, const rclcpp::Clock::SharedPtr & clock,
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr debug_publisher)
 : AbstractPlanningAlgorithm(planner_common_param, clock, collision_vehicle_shape),
   astar_param_(astar_param),
+  debug_marker_pub_(debug_publisher),
   goal_node_(nullptr),
   use_reeds_shepp_(true)
 {
@@ -123,7 +133,6 @@ AstarSearch::AstarSearch(
   reparking_deviation_penalty_ = astar_param_.reparking_deviation_penalty;
   reparking_alignment_weight_ = astar_param_.reparking_alignment_weight;
   reparking_distance_ = astar_param_.reparking_distance;
-  is_reparking_ = false;
 
   near_goal_dist_ =
     std::max(astar_param.near_goal_distance, planner_common_param.longitudinal_goal_range);
@@ -153,16 +162,32 @@ void AstarSearch::resetData()
 
 bool AstarSearch::makePlan(const Pose & start_pose, const Pose & goal_pose)
 {
+  RCLCPP_DEBUG(rclcpp::get_logger("AstarSearch"), "makePlan: Starting path planning");
+
   resetData();
 
   start_pose_ = global2local(costmap_, start_pose);
   goal_pose_ = global2local(costmap_, goal_pose);
 
-  if (detectCollision(start_pose_) || detectCollision(goal_pose_)) {
-    throw std::logic_error("Invalid start or goal pose");
+  const bool start_in_collision = detectCollision(start_pose_);
+  const bool goal_in_collision = detectCollision(goal_pose_);
+  if (start_in_collision || goal_in_collision) {
+    notifyCollisionObserver(
+      start_pose_, "start",
+      start_in_collision ? CollisionStatus::Collision : CollisionStatus::NoCollision);
+    notifyCollisionObserver(
+      goal_pose_, "goal",
+      goal_in_collision ? CollisionStatus::Collision : CollisionStatus::NoCollision);
+    throw std::logic_error(
+      fmt::format(
+        "Invalid start or goal pose due to collision (start collision: {}, goal collision: {})",
+        start_in_collision, goal_in_collision));
   }
 
-  if (is_backward_search_) std::swap(start_pose_, goal_pose_);
+  if (is_backward_search_) {
+    RCLCPP_DEBUG(rclcpp::get_logger("AstarSearch"), "makePlan: Using backward search");
+    std::swap(start_pose_, goal_pose_);
+  }
 
   setCollisionFreeDistanceMap();
 
@@ -198,8 +223,16 @@ bool AstarSearch::makePlan(
     goals_local.push_back(goal_local);
   }
 
-  if (detectCollision(start_pose_) || goals_local.empty()) {
-    throw std::logic_error("Invalid start or goal pose");
+  const bool start_in_collision = detectCollision(start_pose_);
+  if (start_in_collision || goals_local.empty()) {
+    if (start_in_collision) {
+      notifyCollisionObserver(start_pose_, "start", CollisionStatus::Collision);
+    }
+    throw std::logic_error(
+      fmt::format(
+        "Collision in start pose or goal pose empty (start collision: {}, number of valid goals: "
+        "{})",
+        start_in_collision, goals_local.size()));
   }
 
   goal_pose_ = is_backward_search_ ? start_pose_ : goals_local.front();
@@ -235,6 +268,7 @@ void AstarSearch::setReparking(bool is_reparking)
 
 void AstarSearch::setCollisionFreeDistanceMap()
 {
+  RCLCPP_DEBUG(rclcpp::get_logger("AstarSearch"), "makePlan: Building collision free distance map");
   using Entry = std::pair<IndexXY, double>;
   struct CompareEntry
   {
@@ -248,7 +282,15 @@ void AstarSearch::setCollisionFreeDistanceMap()
 
   Entry current;
   std::array<int, 3> offsets = {1, 0, -1};
+
+  size_t iteration_count = 0;
+
+  RCLCPP_DEBUG(
+    rclcpp::get_logger("AstarSearch"), "setCollisionFreeDistanceMap: Time to start while loop");
+
   while (!heap.empty()) {
+    ++iteration_count;
+
     current = heap.top();
     heap.pop();
     const int id = indexToId(current.first);
@@ -272,10 +314,20 @@ void AstarSearch::setCollisionFreeDistanceMap()
       }
     }
   }
+
+  RCLCPP_DEBUG(
+    rclcpp::get_logger("AstarSearch"), "setCollisionFreeDistanceMap: completed in %zu iterations",
+    iteration_count);
+}
+
+void AstarSearch::setCollisionObserver(CollisionObserver observer)
+{
+  collision_observer_ = std::move(observer);
 }
 
 void AstarSearch::setStartNode(const double cost_offset)
 {
+  RCLCPP_DEBUG(rclcpp::get_logger("AstarSearch"), "makePlan: Setting start node");
   const auto index = pose2index(costmap_, start_pose_, planner_common_param_.theta_size);
   // Set start node
   AstarNode * start_node = &graph_[getKey(index)];
@@ -304,14 +356,25 @@ double AstarSearch::estimateCost(const Pose & pose, const IndexXYT & index) cons
 
 bool AstarSearch::search()
 {
+  RCLCPP_DEBUG(rclcpp::get_logger("AstarSearch"), "makePlan: Starting A* search");
   const rclcpp::Time begin = rclcpp::Clock(RCL_ROS_TIME).now();
+
+  size_t iteration_count = 0;
+  size_t nodes_expanded = 0;
 
   // Start A* search
   while (!openlist_.empty()) {
+    ++iteration_count;
     // Check time and terminate if the search reaches the time limit
     const rclcpp::Time now = rclcpp::Clock(RCL_ROS_TIME).now();
     const double msec = (now - begin).seconds() * 1000.0;
     if (msec > planner_common_param_.time_limit) {
+      RCLCPP_WARN(
+        rclcpp::get_logger("AstarSearch"),
+        "A* search failed: time limit exceeded (%.2f ms > %.2f ms, %zu iterations, openlist size: "
+        "%zu, nodes expanded: %zu)",
+        msec, planner_common_param_.time_limit, iteration_count, openlist_.size(), nodes_expanded);
+      publishDebugMarkers();
       return false;
     }
 
@@ -320,10 +383,16 @@ bool AstarSearch::search()
     openlist_.pop();
     if (current_node->status == NodeStatus::Closed) continue;
     current_node->status = NodeStatus::Closed;
+    ++nodes_expanded;
 
     if (isGoal(*current_node)) {
       goal_node_ = current_node;
       setPath(*current_node);
+      RCLCPP_DEBUG(
+        rclcpp::get_logger("AstarSearch"),
+        "A* search succeeded: %zu iterations, %zu nodes expanded, %.2f ms elapsed", iteration_count,
+        nodes_expanded, msec);
+      publishDebugMarkers();
       return true;
     }
 
@@ -331,7 +400,14 @@ bool AstarSearch::search()
     if (astar_param_.use_back) expandNodes(*current_node, true);
   }
 
-  // Failed to find path
+  // Failed to find path - openlist exhausted
+  const rclcpp::Time now = rclcpp::Clock(RCL_ROS_TIME).now();
+  const double msec = (now - begin).seconds() * 1000.0;
+  RCLCPP_WARN(
+    rclcpp::get_logger("AstarSearch"),
+    "A* search failed: openlist exhausted (%zu iterations, %zu nodes expanded, %.2f ms elapsed)",
+    iteration_count, nodes_expanded, msec);
+  publishDebugMarkers();
   return false;
 }
 
@@ -751,6 +827,382 @@ Pose AstarSearch::node2pose(const AstarNode & node) const
   pose_local.orientation = autoware_utils::create_quaternion_from_yaw(node.theta);
 
   return pose_local;
+}
+
+namespace
+{
+// Visualization constants
+constexpr size_t MAX_NODE_MARKERS = 500;       ///< Maximum node markers to prevent RViz overload
+constexpr size_t MAX_LEAF_MARKERS = 200;       ///< Maximum leaf footprint markers
+constexpr double TREE_EDGE_WIDTH = 0.02;       ///< Width of tree connection lines
+constexpr double LEAF_FOOTPRINT_WIDTH = 0.02;  ///< Width of leaf footprint lines
+constexpr float TREE_EDGE_ALPHA = 0.2f;        ///< Transparency for tree edges
+constexpr float TREE_EDGE_COLOR = 0.7f;        ///< Gray color for tree edges
+
+/// @brief Create marker header
+std_msgs::msg::Header createMarkerHeader(const std::string & frame_id, const rclcpp::Time & stamp)
+{
+  std_msgs::msg::Header header;
+  header.frame_id = frame_id;
+  header.stamp = stamp;
+  return header;
+}
+
+/// @brief Identifies leaf nodes in the graph (nodes with no children)
+std::vector<bool> identifyLeafNodes(const std::vector<AstarNode> & graph)
+{
+  std::vector<bool> has_child(graph.size(), false);
+  const auto * graph_data = graph.data();
+  const auto * graph_end = graph_data + graph.size();
+
+  for (const auto & node : graph) {
+    if (node.parent == nullptr) {
+      continue;
+    }
+    const auto * parent_ptr = node.parent;
+    if (parent_ptr >= graph_data && parent_ptr < graph_end) {
+      const size_t parent_index = static_cast<size_t>(parent_ptr - graph_data);
+      has_child[parent_index] = true;
+    }
+  }
+
+  return has_child;
+}
+
+/// @brief Counts leaf nodes for decimation calculation
+size_t countLeafNodes(const std::vector<AstarNode> & graph, const std::vector<bool> & has_child)
+{
+  const auto * graph_data = graph.data();
+  return std::count_if(graph.begin(), graph.end(), [&](const AstarNode & node) {
+    if (node.status == NodeStatus::None) {
+      return false;
+    }
+    const size_t node_index = static_cast<size_t>(&node - graph_data);
+    return !has_child[node_index];
+  });
+}
+
+/// @brief Populates graph visualization markers with decimated nodes, edges, and leaf footprints
+template <typename NodeToPose>
+void populateGraphMarkers(
+  const std::vector<AstarNode> & graph, const std::vector<bool> & has_child,
+  const size_t decimation, const size_t leaf_decimation,
+  visualization_msgs::msg::Marker & open_nodes_marker,
+  visualization_msgs::msg::Marker & closed_nodes_marker,
+  visualization_msgs::msg::Marker & tree_edges_marker,
+  visualization_msgs::msg::Marker & leaf_footprint_marker,
+  const nav_msgs::msg::OccupancyGrid & costmap, const VehicleShape & collision_vehicle_shape,
+  const NodeToPose & node_to_pose)
+{
+  const auto * graph_data = graph.data();
+  size_t node_counter = 0;
+  size_t leaf_counter = 0;
+
+  for (const auto & node : graph) {
+    if (node.status == NodeStatus::None) {
+      continue;
+    }
+
+    const size_t node_index = static_cast<size_t>(&node - graph_data);
+    const bool use_decimated = (node_counter++ % decimation == 0);
+
+    if (use_decimated) {
+      const auto global_pose = local2global(costmap, node_to_pose(node));
+      geometry_msgs::msg::Point point;
+      point.x = global_pose.position.x;
+      point.y = global_pose.position.y;
+      point.z = global_pose.position.z;
+
+      if (node.status == NodeStatus::Open) {
+        open_nodes_marker.points.push_back(point);
+      } else if (node.status == NodeStatus::Closed) {
+        closed_nodes_marker.points.push_back(point);
+      }
+
+      if (node.parent != nullptr) {
+        const auto parent_pose = local2global(costmap, node_to_pose(*node.parent));
+        geometry_msgs::msg::Point parent_point;
+        parent_point.x = parent_pose.position.x;
+        parent_point.y = parent_pose.position.y;
+        parent_point.z = parent_pose.position.z;
+        tree_edges_marker.points.push_back(parent_point);
+        tree_edges_marker.points.push_back(point);
+      }
+    }
+
+    if (!has_child[node_index]) {
+      if (leaf_counter++ % leaf_decimation != 0) {
+        continue;
+      }
+
+      const auto node_pose_local = node_to_pose(node);
+      const auto footprint_local = createFootprintPoints(node_pose_local, collision_vehicle_shape);
+
+      std::array<geometry_msgs::msg::Point, 4> footprint_points;
+      for (size_t i = 0; i < footprint_local.size(); ++i) {
+        geometry_msgs::msg::Pose corner_pose;
+        corner_pose.position = footprint_local[i];
+        corner_pose.orientation.w = 1.0;
+        const auto global_corner = local2global(costmap, corner_pose);
+        footprint_points[i] = global_corner.position;
+      }
+
+      const std::array<std::pair<size_t, size_t>, 4> edges = {
+        std::make_pair(0U, 1U), std::make_pair(1U, 2U), std::make_pair(2U, 3U),
+        std::make_pair(3U, 0U)};
+      for (const auto & edge : edges) {
+        leaf_footprint_marker.points.push_back(footprint_points[edge.first]);
+        leaf_footprint_marker.points.push_back(footprint_points[edge.second]);
+      }
+    }
+  }
+}
+
+/// @brief Creates final path marker from goal node to start
+template <typename NodeToPose>
+std::optional<visualization_msgs::msg::Marker> createPathMarker(
+  const std_msgs::msg::Header & header, const AstarNode * goal_node,
+  const nav_msgs::msg::OccupancyGrid & costmap, const NodeToPose & node_to_pose)
+{
+  if (goal_node == nullptr) {
+    return std::nullopt;
+  }
+
+  visualization_msgs::msg::Marker path_marker;
+  path_marker.header = header;
+  path_marker.ns = "astar_final_path";
+  path_marker.id = 0;
+  path_marker.type = visualization_msgs::msg::Marker::LINE_STRIP;
+  path_marker.action = visualization_msgs::msg::Marker::ADD;
+  path_marker.scale.x = 0.12;
+  path_marker.color.r = 0.0f;
+  path_marker.color.g = 0.5f;
+  path_marker.color.b = 1.0f;
+  path_marker.color.a = 0.9f;
+
+  const AstarNode * node = goal_node;
+  while (node != nullptr) {
+    const auto global_pose = local2global(costmap, node_to_pose(*node));
+    geometry_msgs::msg::Point point;
+    point.x = global_pose.position.x;
+    point.y = global_pose.position.y;
+    point.z = global_pose.position.z;
+    path_marker.points.push_back(point);
+    node = node->parent;
+  }
+
+  return path_marker;
+}
+
+/// @brief Creates start and goal arrow markers
+std::array<visualization_msgs::msg::Marker, 2> createStartGoalMarkers(
+  const std_msgs::msg::Header & header, const Pose & start_pose, const Pose & goal_pose,
+  const nav_msgs::msg::OccupancyGrid & costmap)
+{
+  std::array<visualization_msgs::msg::Marker, 2> markers;
+
+  // Start marker (green)
+  markers[0].header = header;
+  markers[0].ns = "astar_start_goal";
+  markers[0].id = 0;
+  markers[0].type = visualization_msgs::msg::Marker::ARROW;
+  markers[0].action = visualization_msgs::msg::Marker::ADD;
+  markers[0].pose = local2global(costmap, start_pose);
+  markers[0].scale.x = 0.5;
+  markers[0].scale.y = 0.2;
+  markers[0].scale.z = 0.2;
+  markers[0].color.r = 0.0f;
+  markers[0].color.g = 1.0f;
+  markers[0].color.b = 0.0f;
+  markers[0].color.a = 1.0f;
+
+  // Goal marker (red)
+  markers[1].header = header;
+  markers[1].ns = "astar_start_goal";
+  markers[1].id = 1;
+  markers[1].type = visualization_msgs::msg::Marker::ARROW;
+  markers[1].action = visualization_msgs::msg::Marker::ADD;
+  markers[1].pose = local2global(costmap, goal_pose);
+  markers[1].scale.x = 0.5;
+  markers[1].scale.y = 0.2;
+  markers[1].scale.z = 0.2;
+  markers[1].color.r = 1.0f;
+  markers[1].color.g = 0.0f;
+  markers[1].color.b = 0.0f;
+  markers[1].color.a = 1.0f;
+
+  return markers;
+}
+
+/// @brief Creates statistics text marker
+visualization_msgs::msg::Marker createStatisticsMarker(
+  const std_msgs::msg::Header & header, const Pose & start_pose,
+  const nav_msgs::msg::OccupancyGrid & costmap, const size_t open_count, const size_t closed_count,
+  const size_t decimation, const bool goal_found)
+{
+  visualization_msgs::msg::Marker text_marker;
+  text_marker.header = header;
+  text_marker.ns = "astar_stats";
+  text_marker.id = 0;
+  text_marker.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+  text_marker.action = visualization_msgs::msg::Marker::ADD;
+
+  const auto global_start = local2global(costmap, start_pose);
+  text_marker.pose.position.x = global_start.position.x;
+  text_marker.pose.position.y = global_start.position.y;
+  text_marker.pose.position.z = global_start.position.z + 1.5;
+  text_marker.pose.orientation.w = 1.0;
+
+  text_marker.text = "A* Search\\nOpen: " + std::to_string(open_count) +
+                     "\\nClosed: " + std::to_string(closed_count) + "\\nShown: ~" +
+                     std::to_string((open_count + closed_count) / decimation) +
+                     "\\nGoal: " + (goal_found ? "Found" : "Not Found");
+
+  text_marker.scale.z = 0.3;
+  text_marker.color.r = 1.0f;
+  text_marker.color.g = 1.0f;
+  text_marker.color.b = 1.0f;
+  text_marker.color.a = 1.0f;
+
+  return text_marker;
+}
+}  // namespace
+
+void AstarSearch::publishDebugMarkers() const
+{
+  if (!astar_param_.enable_debug_markers || !debug_marker_pub_) {
+    return;
+  }
+
+  visualization_msgs::msg::MarkerArray marker_array;
+  const auto header = createMarkerHeader(costmap_.header.frame_id, clock_->now());
+
+  // Clear previous markers
+  visualization_msgs::msg::Marker clear_marker;
+  clear_marker.header = header;
+  clear_marker.ns = "astar_search";
+  clear_marker.id = 0;
+  clear_marker.action = visualization_msgs::msg::Marker::DELETEALL;
+  marker_array.markers.push_back(clear_marker);
+
+  // Count nodes for decimation
+  const size_t open_count = std::count_if(graph_.begin(), graph_.end(), [](const AstarNode & node) {
+    return node.status == NodeStatus::Open;
+  });
+  const size_t closed_count = std::count_if(
+    graph_.begin(), graph_.end(),
+    [](const AstarNode & node) { return node.status == NodeStatus::Closed; });
+
+  const size_t total_nodes = open_count + closed_count;
+  const size_t decimation = std::max(size_t(1), total_nodes / MAX_NODE_MARKERS);
+
+  // Create empty markers for graph visualization
+  visualization_msgs::msg::Marker open_nodes_marker;
+  open_nodes_marker.header = header;
+  open_nodes_marker.ns = "astar_open_nodes";
+  open_nodes_marker.id = 0;
+  open_nodes_marker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
+  open_nodes_marker.action = visualization_msgs::msg::Marker::ADD;
+  open_nodes_marker.scale.x = 0.1;
+  open_nodes_marker.scale.y = 0.1;
+  open_nodes_marker.scale.z = 0.1;
+  open_nodes_marker.color.r = 1.0f;
+  open_nodes_marker.color.g = 1.0f;
+  open_nodes_marker.color.b = 0.0f;
+  open_nodes_marker.color.a = 0.6f;
+
+  visualization_msgs::msg::Marker closed_nodes_marker;
+  closed_nodes_marker.header = header;
+  closed_nodes_marker.ns = "astar_closed_nodes";
+  closed_nodes_marker.id = 0;
+  closed_nodes_marker.type = visualization_msgs::msg::Marker::SPHERE_LIST;
+  closed_nodes_marker.action = visualization_msgs::msg::Marker::ADD;
+  closed_nodes_marker.scale.x = 0.08;
+  closed_nodes_marker.scale.y = 0.08;
+  closed_nodes_marker.scale.z = 0.08;
+  closed_nodes_marker.color.r = 0.0f;
+  closed_nodes_marker.color.g = 0.8f;
+  closed_nodes_marker.color.b = 0.0f;
+  closed_nodes_marker.color.a = 0.4f;
+
+  visualization_msgs::msg::Marker tree_edges_marker;
+  tree_edges_marker.header = header;
+  tree_edges_marker.ns = "astar_tree_edges";
+  tree_edges_marker.id = 0;
+  tree_edges_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
+  tree_edges_marker.action = visualization_msgs::msg::Marker::ADD;
+  tree_edges_marker.scale.x = TREE_EDGE_WIDTH;
+  tree_edges_marker.color.r = TREE_EDGE_COLOR;
+  tree_edges_marker.color.g = TREE_EDGE_COLOR;
+  tree_edges_marker.color.b = TREE_EDGE_COLOR;
+  tree_edges_marker.color.a = TREE_EDGE_ALPHA;
+
+  visualization_msgs::msg::Marker leaf_footprint_marker;
+  leaf_footprint_marker.header = header;
+  leaf_footprint_marker.ns = "astar_leaf_footprints";
+  leaf_footprint_marker.id = 0;
+  leaf_footprint_marker.type = visualization_msgs::msg::Marker::LINE_LIST;
+  leaf_footprint_marker.action = visualization_msgs::msg::Marker::ADD;
+  leaf_footprint_marker.scale.x = LEAF_FOOTPRINT_WIDTH;
+  leaf_footprint_marker.color.r = 0.0f;
+  leaf_footprint_marker.color.g = 1.0f;
+  leaf_footprint_marker.color.b = 1.0f;
+  leaf_footprint_marker.color.a = 0.5f;
+
+  // Identify leaf nodes and calculate decimation
+  const auto has_child = identifyLeafNodes(graph_);
+  const size_t leaf_count = countLeafNodes(graph_, has_child);
+  const size_t leaf_decimation = std::max(size_t(1), leaf_count / MAX_LEAF_MARKERS);
+
+  const auto node_to_pose = [this](const AstarNode & node) { return node2pose(node); };
+
+  // Populate all graph markers in one pass
+  populateGraphMarkers(
+    graph_, has_child, decimation, leaf_decimation, open_nodes_marker, closed_nodes_marker,
+    tree_edges_marker, leaf_footprint_marker, costmap_, collision_vehicle_shape_, node_to_pose);
+
+  // Add non-empty markers to array
+  if (!open_nodes_marker.points.empty()) {
+    marker_array.markers.push_back(open_nodes_marker);
+  }
+  if (!closed_nodes_marker.points.empty()) {
+    marker_array.markers.push_back(closed_nodes_marker);
+  }
+  if (!tree_edges_marker.points.empty()) {
+    marker_array.markers.push_back(tree_edges_marker);
+  }
+  if (!leaf_footprint_marker.points.empty()) {
+    marker_array.markers.push_back(leaf_footprint_marker);
+  }
+
+  // Add path marker if goal was reached
+  const auto path_marker = createPathMarker(header, goal_node_, costmap_, node_to_pose);
+  if (path_marker.has_value()) {
+    marker_array.markers.push_back(path_marker.value());
+  }
+
+  // Add start and goal markers
+  const auto start_goal_markers = createStartGoalMarkers(header, start_pose_, goal_pose_, costmap_);
+  marker_array.markers.push_back(start_goal_markers[0]);
+  marker_array.markers.push_back(start_goal_markers[1]);
+
+  // Add statistics text marker
+  const auto stats_marker = createStatisticsMarker(
+    header, start_pose_, costmap_, open_count, closed_count, decimation, goal_node_ != nullptr);
+  marker_array.markers.push_back(stats_marker);
+
+  // Publish all markers
+  debug_marker_pub_->publish(marker_array);
+}
+
+void AstarSearch::notifyCollisionObserver(
+  const Pose & pose_local, const std::string & label, const CollisionStatus status) const
+{
+  if (!collision_observer_) {
+    return;
+  }
+
+  collision_observer_(pose_local, label, status);
 }
 
 }  // namespace autoware::freespace_planning_algorithms

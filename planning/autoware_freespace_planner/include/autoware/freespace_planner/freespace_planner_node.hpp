@@ -47,6 +47,7 @@
 #include <nav_msgs/msg/occupancy_grid.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
 
 #ifdef ROS_DISTRO_GALACTIC
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
@@ -116,6 +117,8 @@ private:
   rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr parking_state_pub_;
   rclcpp::Publisher<autoware_internal_debug_msgs::msg::Float64Stamped>::SharedPtr
     processing_time_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr debug_marker_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr virtual_wall_pub_;
 
   rclcpp::Subscription<LaneletRoute>::SharedPtr route_sub_;
 
@@ -133,6 +136,7 @@ private:
   // params
   NodeParam node_param_;
   VehicleShape vehicle_shape_;
+  VehicleShape collision_vehicle_shape_;
 
   // variables
   std::unique_ptr<AbstractPlanningAlgorithm> algo_;
@@ -149,6 +153,13 @@ private:
   bool reset_in_progress_ = false;
   bool is_new_parking_cycle_ = true;
   boost::optional<rclcpp::Time> obs_found_time_;
+  boost::optional<geometry_msgs::msg::Pose> obstacle_pose_;
+  boost::optional<geometry_msgs::msg::Pose> stop_virtual_wall_pose_;
+  std::string collision_context_label_;
+  double base_link2front_ = 0.0;
+
+  enum class StopVirtualWallReason { None, ObstacleOnTrajectory, NoPathToGoal };
+  StopVirtualWallReason stop_virtual_wall_reason_ = StopVirtualWallReason::None;
 
   LaneletRoute::ConstSharedPtr route_;
   OccupancyGrid::ConstSharedPtr occupancy_grid_;
@@ -203,6 +214,10 @@ private:
    *         obs_found_time_ exceeds the parameter th_obstacle_time_sec
    */
   bool checkCurrentTrajectoryCollision();
+
+  void publishStopVirtualWall(const StopVirtualWallReason reason);
+  void publishCollisionFootprintMarker(
+    const geometry_msgs::msg::Pose & pose_local, const std::string & label);
 
   TransformStamped getTransform(const std::string & from, const std::string & to);
 

@@ -60,6 +60,7 @@
       reparking_deviation_penalty: 10.0
       reparking_alignment_weight: 2.0
       reparking_distance: 2.0
+      enable_debug_markers: false
 
     # -- RRT* search Configurations --
     rrtstar:

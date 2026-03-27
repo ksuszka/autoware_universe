@@ -100,20 +100,20 @@ double calcMPCTrajectoryArcLength(const MPCTrajectory & trajectory)
   return length;
 }
 
-std::pair<bool, MPCTrajectory> resampleMPCTrajectoryByDistance(
+std::tuple<bool, MPCTrajectory, size_t> resampleMPCTrajectoryByDistance(
   const MPCTrajectory & input, const double resample_interval_dist, const size_t nearest_seg_idx,
   const double ego_offset_to_segment)
 {
   MPCTrajectory output;
 
   if (input.empty()) {
-    return {true, output};
+    return {false, output, 0};
   }
   std::vector<double> input_arclength;
   calcMPCTrajectoryArcLength(input, input_arclength);
 
   if (input_arclength.empty()) {
-    return {false, output};
+    return {false, output, 0};
   }
 
   std::vector<double> output_arclength;
@@ -125,6 +125,8 @@ std::pair<bool, MPCTrajectory> resampleMPCTrajectoryByDistance(
        0 <= s; s -= resample_interval_dist) {
     output_arclength.push_back(s);
   }
+  // segment index corresponding to the base_link position in the output trajectory
+  auto base_link_segment_idx = output_arclength.size() - 1;
   std::reverse(output_arclength.begin(), output_arclength.end());
   for (double s = std::max(input_arclength.at(nearest_seg_idx) + ego_offset_to_segment, 0.0) +
                   resample_interval_dist;
@@ -151,7 +153,7 @@ std::pair<bool, MPCTrajectory> resampleMPCTrajectoryByDistance(
   output.smooth_k = spline_arc_length(input.smooth_k);
   output.relative_time = lerp_arc_length(input.relative_time);  // must be linear
 
-  return {true, output};
+  return {true, output, base_link_segment_idx};
 }
 
 bool linearInterpMPCTrajectory(
@@ -314,13 +316,10 @@ void dynamicSmoothingVelocity(
   MPCTrajectory & traj)
 {
   double curr_v = start_vel;
-  // set current velocity in both start and end point of the segment
+  // set current velocity in start of the segment
   traj.vx.at(start_seg_idx) = start_vel;
-  if (1 < traj.vx.size()) {
-    traj.vx.at(start_seg_idx + 1) = start_vel;
-  }
 
-  for (size_t i = start_seg_idx + 2; i < traj.size(); ++i) {
+  for (size_t i = start_seg_idx + 1; i < traj.size(); ++i) {
     const double ds = calcDistance2d(traj, i, i - 1);
     const double dt = ds / std::max(std::fabs(curr_v), std::numeric_limits<double>::epsilon());
     const double a = tau / std::max(tau + dt, std::numeric_limits<double>::epsilon());
@@ -333,24 +332,12 @@ void dynamicSmoothingVelocity(
 }
 
 bool calcNearestPoseInterp(
-  const MPCTrajectory & traj, const Pose & self_pose, Pose * nearest_pose, size_t * nearest_index,
-  double * nearest_time, const double max_dist, const double max_yaw)
+  const MPCTrajectory & traj, const Pose & self_pose, Pose * nearest_pose, const size_t * const nearest_index,
+  double * nearest_time)
 {
-  if (traj.empty() || !nearest_pose || !nearest_index || !nearest_time) {
+  if (traj.empty() || !nearest_pose || !nearest_time || *nearest_index >= traj.size()) {
     return false;
   }
-
-  const auto autoware_traj = convertToAutowareTrajectory(traj);
-  if (autoware_traj.points.empty()) {
-    const auto logger = rclcpp::get_logger("mpc_util");
-    auto clock = rclcpp::Clock(RCL_ROS_TIME);
-    RCLCPP_WARN_THROTTLE(logger, clock, 5000, "[calcNearestPoseInterp] input trajectory is empty");
-    return false;
-  }
-
-  *nearest_index = autoware::motion_utils::findFirstNearestIndexWithSoftConstraints(
-    autoware_traj.points, self_pose, max_dist, max_yaw);
-  const size_t traj_size = traj.size();
 
   if (traj.size() == 1) {
     nearest_pose->position.x = traj.x.at(*nearest_index);
@@ -362,24 +349,8 @@ bool calcNearestPoseInterp(
 
   /* get second nearest index = next to nearest_index */
   const auto [prev, next] = [&]() -> std::pair<size_t, size_t> {
-    if (*nearest_index == 0) {
-      return std::make_pair(0, 1);
-    }
-    if (*nearest_index == traj_size - 1) {
-      return std::make_pair(traj_size - 2, traj_size - 1);
-    }
-
-    geometry_msgs::msg::Point nearest_traj_point;
-    nearest_traj_point.x = traj.x.at(*nearest_index);
-    nearest_traj_point.y = traj.y.at(*nearest_index);
-    geometry_msgs::msg::Point next_nearest_traj_point;
-    next_nearest_traj_point.x = traj.x.at(*nearest_index + 1);
-    next_nearest_traj_point.y = traj.y.at(*nearest_index + 1);
-
-    const double signed_length =
-      calcLongitudinalOffset(nearest_traj_point, next_nearest_traj_point, self_pose.position);
-    if (signed_length <= 0) {
-      return std::make_pair(*nearest_index - 1, *nearest_index);
+    if (*nearest_index == traj.size() - 1) {
+      return std::make_pair(traj.size() - 2, traj.size() - 1);
     }
     return std::make_pair(*nearest_index, *nearest_index + 1);
   }();

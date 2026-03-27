@@ -24,7 +24,9 @@
 #include <nav_msgs/msg/occupancy_grid.hpp>
 
 #include <algorithm>
+#include <array>
 #include <limits>
+#include <optional>
 #include <vector>
 
 namespace autoware::freespace_planning_algorithms
@@ -113,6 +115,9 @@ struct VehicleShape
   }
 };
 
+std::array<geometry_msgs::msg::Point, 4> createFootprintPoints(
+  const geometry_msgs::msg::Pose & pose_local, const VehicleShape & shape);
+
 struct PlannerCommonParam
 {
   // base configs
@@ -188,6 +193,8 @@ public:
     const geometry_msgs::msg::Pose & start_pose,
     const std::vector<geometry_msgs::msg::Pose> & goal_candidates) = 0;
   virtual bool hasObstacleOnTrajectory(const geometry_msgs::msg::PoseArray & trajectory) const;
+  virtual std::optional<geometry_msgs::msg::Pose> getFirstCollisionPose(
+    const geometry_msgs::msg::PoseArray & trajectory) const;
   const PlannerWaypoints & getWaypoints() const { return waypoints_; }
   double getDistanceToObstacle(const geometry_msgs::msg::Pose & pose) const;
 

@@ -304,7 +304,7 @@ private:
    * @return The filtered trajectory.
    */
   MPCTrajectory applyVelocityDynamicsFilter(
-    const MPCTrajectory & trajectory, const Odometry & current_kinematics) const;
+    const MPCTrajectory & trajectory, const Odometry & current_kinematics, size_t base_link_segment_idx) const;
 
   /**
    * @brief Get the prediction time step for MPC. If the trajectory length is shorter than
@@ -423,6 +423,7 @@ private:
 
 public:
   MPCTrajectory m_reference_trajectory;  // Reference trajectory to be followed.
+  size_t m_reference_trajectory_base_link_idx = 0;  // Index of the base link segment in reference trajectory.
   MPCParam m_param;                      // MPC design parameters.
   std::deque<double> m_input_buffer;     // MPC output buffer for delay time compensation.
   double m_raw_steer_cmd_prev = 0.0;     // Previous MPC raw output.

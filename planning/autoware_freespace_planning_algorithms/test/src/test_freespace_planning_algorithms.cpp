@@ -247,7 +247,8 @@ std::unique_ptr<fpa::AbstractPlanningAlgorithm> configure_astar(bool use_multi)
     reparking_forward_first_weight,
     reparking_deviation_penalty,
     reparking_alignment_weight,
-    reparking_distance};
+    reparking_distance,
+    false};  // enable_debug_markers
 
   auto clock_ptr = std::make_shared<rclcpp::Clock>(RCL_ROS_TIME);
   auto algo =

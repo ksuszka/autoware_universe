@@ -237,8 +237,9 @@ TEST_F(MPCTest, InitializeAndCalculateRightTurn)
 
   // Init parameters and reference trajectory
   initializeMPC(*mpc);
-  const auto current_kinematics =
-    makeOdometry(dummy_right_turn_trajectory.points.front().pose, 0.0);
+  // use current kinematic state in setting reference trajectory,
+  // base link segment is calculated at this step
+  const auto current_kinematics = makeOdometry(pose_zero, default_velocity);
   mpc->setReferenceTrajectory(dummy_right_turn_trajectory, trajectory_param, current_kinematics);
 
   // Calculate MPC
@@ -246,9 +247,10 @@ TEST_F(MPCTest, InitializeAndCalculateRightTurn)
   Trajectory pred_traj;
   Float32MultiArrayStamped diag;
   LateralHorizon ctrl_cmd_horizon;
-  const auto odom = makeOdometry(pose_zero, default_velocity);
   ASSERT_TRUE(
-    mpc->calculateMPC(neutral_steer, odom, ctrl_cmd, pred_traj, diag, ctrl_cmd_horizon).result);
+    mpc
+      ->calculateMPC(neutral_steer, current_kinematics, ctrl_cmd, pred_traj, diag, ctrl_cmd_horizon)
+      .result);
   EXPECT_LT(ctrl_cmd.steering_tire_angle, 0.0f);
   EXPECT_LT(ctrl_cmd.steering_tire_rotation_rate, 0.0f);
   EXPECT_EQ(ctrl_cmd_horizon.controls.size(), param.prediction_horizon);
@@ -261,7 +263,9 @@ TEST_F(MPCTest, OsqpCalculate)
   auto node = rclcpp::Node("mpc_test_node", rclcpp::NodeOptions{});
   auto mpc = std::make_unique<MPC>(node);
   initializeMPC(*mpc);
-  const auto current_kinematics = makeOdometry(dummy_straight_trajectory.points.front().pose, 0.0);
+  // use current kinematic state in setting reference trajectory,
+  // base link segment is calculated at this step
+  const auto current_kinematics = makeOdometry(pose_zero, default_velocity);
   mpc->setReferenceTrajectory(dummy_straight_trajectory, trajectory_param, current_kinematics);
 
   std::shared_ptr<VehicleModelInterface> vehicle_model_ptr =
@@ -279,9 +283,10 @@ TEST_F(MPCTest, OsqpCalculate)
   Trajectory pred_traj;
   Float32MultiArrayStamped diag;
   LateralHorizon ctrl_cmd_horizon;
-  const auto odom = makeOdometry(pose_zero, default_velocity);
   EXPECT_TRUE(
-    mpc->calculateMPC(neutral_steer, odom, ctrl_cmd, pred_traj, diag, ctrl_cmd_horizon).result);
+    mpc
+      ->calculateMPC(neutral_steer, current_kinematics, ctrl_cmd, pred_traj, diag, ctrl_cmd_horizon)
+      .result);
   EXPECT_EQ(ctrl_cmd.steering_tire_angle, 0.0f);
   EXPECT_EQ(ctrl_cmd.steering_tire_rotation_rate, 0.0f);
   EXPECT_EQ(ctrl_cmd_horizon.controls.size(), param.prediction_horizon);
@@ -294,8 +299,9 @@ TEST_F(MPCTest, OsqpCalculateRightTurn)
   auto node = rclcpp::Node("mpc_test_node", rclcpp::NodeOptions{});
   auto mpc = std::make_unique<MPC>(node);
   initializeMPC(*mpc);
-  const auto current_kinematics =
-    makeOdometry(dummy_right_turn_trajectory.points.front().pose, 0.0);
+  // use current kinematic state in setting reference trajectory,
+  // base link segment is calculated at this step
+  const auto current_kinematics = makeOdometry(pose_zero, default_velocity);
   mpc->setReferenceTrajectory(dummy_right_turn_trajectory, trajectory_param, current_kinematics);
 
   std::shared_ptr<VehicleModelInterface> vehicle_model_ptr =
@@ -313,9 +319,10 @@ TEST_F(MPCTest, OsqpCalculateRightTurn)
   Trajectory pred_traj;
   Float32MultiArrayStamped diag;
   LateralHorizon ctrl_cmd_horizon;
-  const auto odom = makeOdometry(pose_zero, default_velocity);
   ASSERT_TRUE(
-    mpc->calculateMPC(neutral_steer, odom, ctrl_cmd, pred_traj, diag, ctrl_cmd_horizon).result);
+    mpc
+      ->calculateMPC(neutral_steer, current_kinematics, ctrl_cmd, pred_traj, diag, ctrl_cmd_horizon)
+      .result);
   EXPECT_LT(ctrl_cmd.steering_tire_angle, 0.0f);
   EXPECT_LT(ctrl_cmd.steering_tire_rotation_rate, 0.0f);
   EXPECT_EQ(ctrl_cmd_horizon.controls.size(), param.prediction_horizon);
@@ -341,16 +348,19 @@ TEST_F(MPCTest, KinematicsNoDelayCalculate)
   // Init filters
   mpc->initializeLowPassFilters(steering_lpf_cutoff_hz, error_deriv_lpf_cutoff_hz);
   // Init trajectory
-  const auto current_kinematics = makeOdometry(dummy_straight_trajectory.points.front().pose, 0.0);
+  // use current kinematic state in setting reference trajectory,
+  // base link segment is calculated at this step
+  const auto current_kinematics = makeOdometry(pose_zero, default_velocity);
   mpc->setReferenceTrajectory(dummy_straight_trajectory, trajectory_param, current_kinematics);
   // Calculate MPC
   Lateral ctrl_cmd;
   Trajectory pred_traj;
   Float32MultiArrayStamped diag;
   LateralHorizon ctrl_cmd_horizon;
-  const auto odom = makeOdometry(pose_zero, default_velocity);
   ASSERT_TRUE(
-    mpc->calculateMPC(neutral_steer, odom, ctrl_cmd, pred_traj, diag, ctrl_cmd_horizon).result);
+    mpc
+      ->calculateMPC(neutral_steer, current_kinematics, ctrl_cmd, pred_traj, diag, ctrl_cmd_horizon)
+      .result);
   EXPECT_EQ(ctrl_cmd.steering_tire_angle, 0.0f);
   EXPECT_EQ(ctrl_cmd.steering_tire_rotation_rate, 0.0f);
   EXPECT_EQ(ctrl_cmd_horizon.controls.size(), param.prediction_horizon);
@@ -363,8 +373,9 @@ TEST_F(MPCTest, KinematicsNoDelayCalculateRightTurn)
   auto node = rclcpp::Node("mpc_test_node", rclcpp::NodeOptions{});
   auto mpc = std::make_unique<MPC>(node);
   initializeMPC(*mpc);
-  const auto current_kinematics =
-    makeOdometry(dummy_right_turn_trajectory.points.front().pose, 0.0);
+  // use current kinematic state in setting reference trajectory,
+  // base link segment is calculated at this step
+  const auto current_kinematics = makeOdometry(pose_zero, default_velocity);
   mpc->setReferenceTrajectory(dummy_right_turn_trajectory, trajectory_param, current_kinematics);
 
   std::shared_ptr<VehicleModelInterface> vehicle_model_ptr =
@@ -384,9 +395,10 @@ TEST_F(MPCTest, KinematicsNoDelayCalculateRightTurn)
   Trajectory pred_traj;
   Float32MultiArrayStamped diag;
   LateralHorizon ctrl_cmd_horizon;
-  const auto odom = makeOdometry(pose_zero, default_velocity);
   ASSERT_TRUE(
-    mpc->calculateMPC(neutral_steer, odom, ctrl_cmd, pred_traj, diag, ctrl_cmd_horizon).result);
+    mpc
+      ->calculateMPC(neutral_steer, current_kinematics, ctrl_cmd, pred_traj, diag, ctrl_cmd_horizon)
+      .result);
   EXPECT_LT(ctrl_cmd.steering_tire_angle, 0.0f);
   EXPECT_LT(ctrl_cmd.steering_tire_rotation_rate, 0.0f);
   EXPECT_EQ(ctrl_cmd_horizon.controls.size(), param.prediction_horizon);

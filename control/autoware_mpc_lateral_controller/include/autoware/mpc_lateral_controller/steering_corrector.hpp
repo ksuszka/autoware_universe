@@ -63,11 +63,13 @@ public:
      @param frenet_trajectory Trajectory in frenet coordinates from MPC optimization.
      @param Uex MPC optimization matrix.
      @param dt Prediction time step.
+     @param is_forward_shift Whether the trajectory is forward or backward, which affects the way of
+   calculating the correction.
      @return MPC optimization result with corrected steering.
    */
   const Eigen::VectorXd calculate(
     const MPCTrajectory & reference_trajectory, MPCMatrix mpc_matrix, Eigen::VectorXd initial_state,
-    const Eigen::MatrixXd & Uex, const double dt);
+    const Eigen::MatrixXd & Uex, const double dt, bool is_forward_shift);
 
 private:
   const std::shared_ptr<VehicleModelInterface> m_vehicle_model_ptr;
@@ -88,7 +90,7 @@ private:
    */
   double calculateInputAngleCorrection(
     const Eigen::Vector3d & state, size_t current_idx, const Eigen::MatrixXd & Uex, const double dt,
-    const MPCTrajectory & reference_trajectory, const MPCTrajectory & frenet_trajectory);
+    const MPCTrajectory & reference_trajectory, const MPCTrajectory & frenet_trajectory, bool is_forward_shift);
 
   friend class SteeringCorrectorTest;
 };

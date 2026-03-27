@@ -51,8 +51,8 @@ ResultWithReason MPC::calculateMPC(
 {
   // since the reference trajectory does not take into account the current velocity of the ego
   // vehicle, it needs to calculate the trajectory velocity considering the longitudinal dynamics.
-  const auto reference_trajectory =
-    applyVelocityDynamicsFilter(m_reference_trajectory, current_kinematics);
+  const auto reference_trajectory = applyVelocityDynamicsFilter(
+    m_reference_trajectory, current_kinematics, m_reference_trajectory_base_link_idx);
 
   // get the necessary data
   const auto [get_data_result, mpc_data] =
@@ -103,7 +103,7 @@ ResultWithReason MPC::calculateMPC(
 
     auto initial_state = m_use_delayed_initial_state ? x0_delayed : x0;
     return m_steering_corrector_ptr->calculate(
-      mpc_resampled_ref_trajectory, mpc_matrix, initial_state, opt_uex, prediction_dt);
+      mpc_resampled_ref_trajectory, mpc_matrix, initial_state, opt_uex, prediction_dt, m_is_forward_shift);
   }();
 
   // apply filters for the input limitation and low pass filter
@@ -224,8 +224,9 @@ void MPC::setReferenceTrajectory(
   const auto mpc_traj_raw = MPCUtils::convertToMPCTrajectory(trajectory_msg);
 
   // resampling
-  const auto [success_resample, mpc_traj_resampled] = MPCUtils::resampleMPCTrajectoryByDistance(
-    mpc_traj_raw, param.traj_resample_dist, nearest_seg_idx, ego_offset_to_segment);
+  const auto [success_resample, mpc_traj_resampled, base_link_segment_idx] =
+    MPCUtils::resampleMPCTrajectoryByDistance(
+      mpc_traj_raw, param.traj_resample_dist, nearest_seg_idx, ego_offset_to_segment);
   if (!success_resample) {
     warn_throttle("[setReferenceTrajectory] spline error when resampling by distance");
     return;
@@ -288,6 +289,7 @@ void MPC::setReferenceTrajectory(
   }
 
   m_reference_trajectory = mpc_traj_smoothed;
+  m_reference_trajectory_base_link_idx = base_link_segment_idx;
 }
 
 void MPC::resetPrevResult(const SteeringReport & current_steer)
@@ -306,9 +308,9 @@ std::pair<ResultWithReason, MPCData> MPC::getData(
   const auto current_pose = current_kinematics.pose.pose;
 
   MPCData data;
+  data.nearest_idx = m_reference_trajectory_base_link_idx;
   if (!MPCUtils::calcNearestPoseInterp(
-        traj, current_pose, &(data.nearest_pose), &(data.nearest_idx), &(data.nearest_time),
-        ego_nearest_dist_threshold, ego_nearest_yaw_threshold)) {
+        traj, current_pose, &(data.nearest_pose), &(data.nearest_idx), &(data.nearest_time))) {
     return {ResultWithReason{false, "error in calculating nearest pose"}, MPCData{}};
   }
 
@@ -422,21 +424,16 @@ std::pair<bool, VectorXd> MPC::updateStateForDelayCompensation(
 }
 
 MPCTrajectory MPC::applyVelocityDynamicsFilter(
-  const MPCTrajectory & input, const Odometry & current_kinematics) const
+  const MPCTrajectory & input, const Odometry & current_kinematics,
+  size_t base_link_segment_idx) const
 {
-  const auto autoware_traj = MPCUtils::convertToAutowareTrajectory(input);
-  if (autoware_traj.points.empty()) {
+  if (input.empty()) {
     return input;
   }
 
-  const size_t nearest_seg_idx =
-    autoware::motion_utils::findFirstNearestSegmentIndexWithSoftConstraints(
-      autoware_traj.points, current_kinematics.pose.pose, ego_nearest_dist_threshold,
-      ego_nearest_yaw_threshold);
-
   MPCTrajectory output = input;
   MPCUtils::dynamicSmoothingVelocity(
-    nearest_seg_idx, current_kinematics.twist.twist.linear.x, m_param.acceleration_limit,
+    base_link_segment_idx, current_kinematics.twist.twist.linear.x, m_param.acceleration_limit,
     m_param.velocity_time_constant, output);
 
   auto last_point = output.back();

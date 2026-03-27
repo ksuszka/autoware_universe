@@ -22,6 +22,7 @@
 
 #include <nav_msgs/msg/path.hpp>
 #include <std_msgs/msg/header.hpp>
+#include <visualization_msgs/msg/marker_array.hpp>
 
 #include <boost/optional/optional.hpp>
 
@@ -63,6 +64,7 @@ struct AstarParam
   double reparking_deviation_penalty;
   double reparking_alignment_weight;
   double reparking_distance;
+  bool enable_debug_markers;  // enable visualization of A* search tree in RViz
 };
 
 struct AstarNode
@@ -104,16 +106,22 @@ struct NodeComparison
 class AstarSearch : public AbstractPlanningAlgorithm
 {
 public:
-  AstarSearch(
-    const PlannerCommonParam & planner_common_param, const VehicleShape & collision_vehicle_shape,
-    const AstarParam & astar_param);
+  enum class CollisionStatus : uint8_t { Collision, NoCollision };
+  using CollisionObserver = std::function<void(const Pose &, const std::string &, CollisionStatus)>;
 
   AstarSearch(
     const PlannerCommonParam & planner_common_param, const VehicleShape & collision_vehicle_shape,
-    const AstarParam & astar_param, const rclcpp::Clock::SharedPtr & clock);
+    const AstarParam & astar_param,
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr debug_publisher = nullptr);
+
   AstarSearch(
     const PlannerCommonParam & planner_common_param, const VehicleShape & collision_vehicle_shape,
-    rclcpp::Node & node)
+    const AstarParam & astar_param, const rclcpp::Clock::SharedPtr & clock,
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr debug_publisher = nullptr);
+  AstarSearch(
+    const PlannerCommonParam & planner_common_param, const VehicleShape & collision_vehicle_shape,
+    rclcpp::Node & node,
+    rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr debug_publisher = nullptr)
   : AstarSearch(
       planner_common_param, collision_vehicle_shape,
       AstarParam{
@@ -134,8 +142,9 @@ public:
         node.declare_parameter<double>("astar.reparking_forward_first_weight"),
         node.declare_parameter<double>("astar.reparking_deviation_penalty"),
         node.declare_parameter<double>("astar.reparking_alignment_weight"),
-        node.declare_parameter<double>("astar.reparking_distance")},
-      node.get_clock())
+        node.declare_parameter<double>("astar.reparking_distance"),
+        node.declare_parameter<bool>("astar.enable_debug_markers")},
+      node.get_clock(), debug_publisher)
   {
   }
 
@@ -145,6 +154,8 @@ public:
   bool makePlan(const Pose & start_pose, const std::vector<Pose> & goal_candidates) override;
 
   void setReparking(bool is_reparking) override;
+
+  void setCollisionObserver(CollisionObserver observer);
 
   const PlannerWaypoints & getWaypoints() const { return waypoints_; }
 
@@ -172,8 +183,19 @@ private:
   double getObsDistanceCost(const IndexXYT & index, const EDTData & obs_edt) const;
   double getLatDistanceCost(const Pose & pose) const;
 
+  /// @brief Publish debug visualization markers for A* search tree
+  void publishDebugMarkers() const;
+
+  void notifyCollisionObserver(
+    const Pose & pose_local, const std::string & label, CollisionStatus status) const;
+
   // Algorithm specific param
   AstarParam astar_param_;
+
+  // Debug visualization
+  rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr debug_marker_pub_;
+
+  CollisionObserver collision_observer_;
 
   // hybrid astar variables
   std::vector<AstarNode> graph_;
@@ -208,7 +230,7 @@ private:
   double reparking_distance_;
   bool is_backward_search_;
   bool is_multiple_goals_;
-  bool is_reparking_;
+  bool is_reparking_ = false;
 
   // the following constexpr values were found to be best by trial and error, through multiple
   // tests, and are not expected to be changed regularly, therefore they were not made into ros

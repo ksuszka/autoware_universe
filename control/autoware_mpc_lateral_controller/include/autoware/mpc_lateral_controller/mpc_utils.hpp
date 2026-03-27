@@ -103,9 +103,10 @@ double calcMPCTrajectoryArcLength(const MPCTrajectory & trajectory);
  * @brief resample the given trajectory with the given fixed interval
  * @param [in] input trajectory to resample
  * @param [in] resample_interval_dist the desired distance between two successive trajectory points
- * @return The pair contains the successful flag and the resultant resampled trajectory
+ * @return The tuple contains the successful flag, the resultant resampled trajectory, segment index
+ * where is aligned base link
  */
-std::pair<bool, MPCTrajectory> resampleMPCTrajectoryByDistance(
+std::tuple<bool, MPCTrajectory, size_t> resampleMPCTrajectoryByDistance(
   const MPCTrajectory & input, const double resample_interval_dist, const size_t nearest_seg_idx,
   const double ego_offset_to_segment);
 
@@ -179,8 +180,8 @@ std::vector<double> calcTrajectoryCurvature(
  * @return false when nearest pose couldn't find for some reasons
  */
 bool calcNearestPoseInterp(
-  const MPCTrajectory & traj, const Pose & self_pose, Pose * nearest_pose, size_t * nearest_index,
-  double * nearest_time, const double max_dist, const double max_yaw);
+  const MPCTrajectory & traj, const Pose & self_pose, Pose * nearest_pose, const size_t * const nearest_index,
+  double * nearest_time);
 
 /**
  * @brief calculate distance to stopped point

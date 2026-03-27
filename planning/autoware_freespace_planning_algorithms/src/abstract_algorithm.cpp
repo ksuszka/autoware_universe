@@ -28,6 +28,58 @@ namespace autoware::freespace_planning_algorithms
 {
 using autoware_utils::create_quaternion_from_yaw;
 
+namespace
+{
+/// @brief Rotate a 2D point by a given angle (pure function)
+/// @param x X coordinate
+/// @param y Y coordinate
+/// @param cos_yaw Cosine of rotation angle
+/// @param sin_yaw Sine of rotation angle
+/// @return Rotated (x, y) as a pair
+constexpr std::pair<double, double> rotate_point(double x, double y, double cos_yaw, double sin_yaw)
+{
+  return {cos_yaw * x - sin_yaw * y, sin_yaw * x + cos_yaw * y};
+}
+
+/// @brief Translate a point relative to an origin pose (pure function)
+/// @param offset_x X offset from origin
+/// @param offset_y Y offset from origin
+/// @param origin Origin pose for translation
+/// @return Translated point
+geometry_msgs::msg::Point translate_point(
+  double offset_x, double offset_y, const geometry_msgs::msg::Pose & origin)
+{
+  geometry_msgs::msg::Point point;
+  point.x = origin.position.x + offset_x;
+  point.y = origin.position.y + offset_y;
+  point.z = origin.position.z;
+  return point;
+}
+}  // namespace
+
+std::array<geometry_msgs::msg::Point, 4> createFootprintPoints(
+  const geometry_msgs::msg::Pose & pose_local, const VehicleShape & shape)
+{
+  const double yaw = tf2::getYaw(pose_local.orientation);
+  const double cos_yaw = std::cos(yaw);
+  const double sin_yaw = std::sin(yaw);
+  const double half_width = shape.width / 2.0;
+  const double back = -shape.base2back;
+  const double front = shape.length - shape.base2back;
+
+  const std::array<std::pair<double, double>, 4> corners = {
+    std::make_pair(front, half_width), std::make_pair(front, -half_width),
+    std::make_pair(back, -half_width), std::make_pair(back, half_width)};
+
+  std::array<geometry_msgs::msg::Point, 4> footprint_points;
+  std::transform(
+    corners.begin(), corners.end(), footprint_points.begin(), [&](const auto & corner) {
+      const auto [offset_x, offset_y] = rotate_point(corner.first, corner.second, cos_yaw, sin_yaw);
+      return translate_point(offset_x, offset_y, pose_local);
+    });
+  return footprint_points;
+}
+
 geometry_msgs::msg::Pose transformPose(
   const geometry_msgs::msg::Pose & pose, const geometry_msgs::msg::TransformStamped & transform)
 {
@@ -318,7 +370,8 @@ bool AbstractPlanningAlgorithm::detectCollision(const geometry_msgs::msg::Pose &
 bool AbstractPlanningAlgorithm::detectCollision(const IndexXYT & base_index) const
 {
   if (coll_indexes_table_.empty()) {
-    std::cerr << "[abstract_algorithm] setMap has not yet been done." << std::endl;
+    RCLCPP_WARN(
+      rclcpp::get_logger("freespace_planning_algorithms"), "setMap has not yet been done.");
     return false;
   }
 
@@ -357,6 +410,18 @@ bool AbstractPlanningAlgorithm::hasObstacleOnTrajectory(
   }
 
   return false;
+}
+
+std::optional<geometry_msgs::msg::Pose> AbstractPlanningAlgorithm::getFirstCollisionPose(
+  const geometry_msgs::msg::PoseArray & trajectory) const
+{
+  for (const auto & pose : trajectory.poses) {
+    const auto pose_local = global2local(costmap_, pose);
+    if (detectCollision(pose_local)) {
+      return pose;
+    }
+  }
+  return std::nullopt;
 }
 
 }  // namespace autoware::freespace_planning_algorithms

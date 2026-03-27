@@ -7,6 +7,7 @@
 #include "autoware/mpc_lateral_controller/mpc_trajectory.hpp"
 
 #include <Eigen/Core>
+#include <rclcpp/logging.hpp>
 
 namespace autoware::motion::control::mpc_lateral_controller
 {
@@ -22,7 +23,7 @@ SteeringCorrector::SteeringCorrector(
 
 const Eigen::VectorXd SteeringCorrector::calculate(
   const MPCTrajectory & reference_trajectory, MPCMatrix mpc_matrix, Eigen::VectorXd initial_state,
-  const Eigen::MatrixXd & Uex, const double dt)
+  const Eigen::MatrixXd & Uex, const double dt, bool is_forward_shift)
 {
   const auto DIM_U = m_vehicle_model_ptr->getDimU();
 
@@ -43,8 +44,8 @@ const Eigen::VectorXd SteeringCorrector::calculate(
 
   for (size_t i = 0; i < reference_trajectory.size(); ++i) {
     auto input = Uex(i * DIM_U, 0);
-    auto input_d =
-      calculateInputAngleCorrection(state_w, i, Uex, dt, reference_trajectory, frenet_trajectory);
+    auto input_d = calculateInputAngleCorrection(
+      state_w, i, Uex, dt, reference_trajectory, frenet_trajectory, is_forward_shift);
     auto new_input = std::clamp(input + input_d, -m_steer_limit, m_steer_limit);
     new_steering.push_back(new_input);
 
@@ -73,17 +74,18 @@ const Eigen::Vector3d SteeringCorrector::updateState(
 
 double SteeringCorrector::calculateInputAngleCorrection(
   const Eigen::Vector3d & state, size_t current_idx, const Eigen::MatrixXd & Uex, const double dt,
-  const MPCTrajectory & reference_trajectory, const MPCTrajectory & frenet_trajectory)
+  const MPCTrajectory & reference_trajectory, const MPCTrajectory & frenet_trajectory,
+  bool is_forward_shift)
 {
-  const auto DIM_U = m_vehicle_model_ptr->getDimU();
-
-  auto w_x0 = state(0);
-  auto w_y0 = state(1);
-  auto state_wk = state;
-
+  // Do not calculate correction for first steering command
   if (current_idx <= 0) {
     return 0.0;
   }
+
+  const auto DIM_U = m_vehicle_model_ptr->getDimU();
+  const auto w_x0 = state(0);
+  const auto w_y0 = state(1);
+  auto state_wk = state;
 
   // Find index where distance to current trajectory point is large enough.
   // Minimum 2 points are required, current control affects the next section.
@@ -105,9 +107,10 @@ double SteeringCorrector::calculateInputAngleCorrection(
 
     if (j > 2 && wd_d > m_min_distance_squared && fd_d > m_min_distance_squared) {
       auto correction = std::atan2(wd_x * fd_y - wd_y * fd_x, wd_x * fd_x + wd_y * fd_y) * 1.0;
-      return std::abs(correction) > m_max_heading_diff
-               ? 0.0
-               : std::clamp(correction, -m_correction_limit, m_correction_limit);
+      auto result = std::abs(correction) > m_max_heading_diff
+                      ? 0.0
+                      : std::clamp(correction, -m_correction_limit, m_correction_limit);
+      return is_forward_shift ? result : -result;
     }
   }
   return 0.0;
