@@ -92,4 +92,48 @@ TEST(ObjectMapUtilsTest, testFillPolygonAreas)
 
   EXPECT_EQ(empty_grid_cell_num, 144);
 }
+
+TEST(ObjectMapUtilsTest, testFillObstaclePolygonAreas)
+{
+  const double grid_length_x = 21;
+  const double grid_length_y = 21;
+  const double grid_resolution = 1.0;
+  const double grid_position_x = 0.0;
+  const double grid_position_y = 0.0;
+  grid_map::GridMap gridmap = construct_gridmap(
+    grid_length_x, grid_length_y, grid_resolution, grid_position_x, grid_position_y);
+
+  const std::string layer_name = "obstacle";
+  gridmap.add(layer_name, 0.0);
+
+  std::vector<geometry_msgs::msg::Polygon> obstacle_polygons;
+  // Creating a polygon of 10x10 area cenered at the origin
+  obstacle_polygons.emplace_back(get_primitive_polygon(-5.0, -5.0, 5.0, 5.0));
+
+  const double min_value = 0.0;
+  const double max_value = 100.0;
+
+  object_map::fill_polygon_areas(gridmap, obstacle_polygons, layer_name, min_value, max_value);
+
+  const auto costmap = gridmap[layer_name];
+
+  int filled_grid_cell_num = 0;
+  int empty_grid_cell_num = 0;
+  for (int i = 0; i < costmap.rows(); i++) {
+    for (int j = 0; j < costmap.cols(); j++) {
+      if (costmap(i, j) == max_value) {
+        filled_grid_cell_num += 1;
+      } else if (costmap(i, j) == min_value) {
+        empty_grid_cell_num += 1;
+      }
+    }
+  }
+
+  // The expected number of filled cells should be close to the area of the polygon (10x10 = 100)
+  EXPECT_EQ(filled_grid_cell_num, 100);
+  // The expected number of empty cells should be close to the total cells minus the filled cells (21x21 - 100 = 341)
+  EXPECT_EQ(empty_grid_cell_num, 341);
+  // Making sure that the total number of cells is equal to the sum of filled and empty cells
+  EXPECT_EQ(filled_grid_cell_num + empty_grid_cell_num, costmap.rows() * costmap.cols());
+}
 }  // namespace autoware::costmap_generator

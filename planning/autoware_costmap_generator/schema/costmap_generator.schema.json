@@ -97,6 +97,11 @@
           "default": true,
           "description": "Whether using `parkinglot` from `~input/vector_map` or not."
         },
+        "use_lanelet_obstacles": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether marking polygons of type `obstacle` from `~input/vector_map` as maximum cost."
+        },
         "expand_polygon_size": {
           "type": "number",
           "default": 1.0,
@@ -125,6 +130,7 @@
         "minimum_lidar_height_thres",
         "use_wayarea",
         "use_parkinglot",
+        "use_lanelet_obstacles",
         "use_objects",
         "use_points",
         "expand_polygon_size",

@@ -232,6 +232,19 @@ void CostmapGenerator::loadParkingAreasFromLaneletMap(
   }
 }
 
+void CostmapGenerator::loadObstacleAreasFromLaneletMap(
+  const lanelet::LaneletMapPtr lanelet_map,
+  std::vector<geometry_msgs::msg::Polygon> & area_polygons)
+{
+  const lanelet::ConstPolygons3d obstacle_polygons =
+    lanelet::utils::query::getAllObstaclePolygons(lanelet_map);
+  for (const auto & ll_poly : obstacle_polygons) {
+    geometry_msgs::msg::Polygon poly;
+    lanelet::utils::conversion::toGeomMsgPoly(ll_poly, &poly);
+    area_polygons.push_back(poly);
+  }
+}
+
 void CostmapGenerator::onLaneletMapBin(
   const autoware_map_msgs::msg::LaneletMapBin::ConstSharedPtr msg)
 {
@@ -244,6 +257,10 @@ void CostmapGenerator::onLaneletMapBin(
 
   if (param_->use_parkinglot) {
     loadParkingAreasFromLaneletMap(lanelet_map_, primitives_polygons_);
+  }
+
+  if (param_->use_lanelet_obstacles) {
+    loadObstacleAreasFromLaneletMap(lanelet_map_, obstacle_polygons_);
   }
 }
 
@@ -293,17 +310,38 @@ void CostmapGenerator::onTimer()
 
   if ((param_->use_wayarea || param_->use_parkinglot) && lanelet_map_) {
     autoware_utils::ScopedTimeTrack st("generatePrimitivesCostmap()", *time_keeper_);
-    costmap_[LayerName::primitives] = generatePrimitivesCostmap();
+    const auto primitives = generatePrimitivesCostmap();
+    if (!primitives) {
+      return;
+    }
+    costmap_[LayerName::primitives] = *primitives;
+  }
+
+  if (param_->use_lanelet_obstacles && lanelet_map_) {
+    autoware_utils::ScopedTimeTrack st("generateObstaclesCostmap()", *time_keeper_);
+    const auto obstacles = generateObstaclesCostmap();
+    if (!obstacles) {
+      return;
+    }
+    costmap_[LayerName::obstacles] = *obstacles;
   }
 
   if (param_->use_objects && objects_) {
     autoware_utils::ScopedTimeTrack st("generateObjectsCostmap()", *time_keeper_);
-    costmap_[LayerName::objects] = generateObjectsCostmap(objects_);
+    const auto objects_map = generateObjectsCostmap(objects_);
+    if (!objects_map) {
+      return;
+    }
+    costmap_[LayerName::objects] = *objects_map;
   }
 
   if (param_->use_points && points_) {
     autoware_utils::ScopedTimeTrack st("generatePointsCostmap()", *time_keeper_);
-    costmap_[LayerName::points] = generatePointsCostmap(points_, tf.transform.translation.z);
+    const auto points_map = generatePointsCostmap(points_, tf.transform.translation.z);
+    if (!points_map) {
+      return;
+    }
+    costmap_[LayerName::points] = *points_map;
   }
 
   {
@@ -353,10 +391,11 @@ void CostmapGenerator::initGridmap()
   costmap_.add(LayerName::points, param_->grid_min_value);
   costmap_.add(LayerName::objects, param_->grid_min_value);
   costmap_.add(LayerName::primitives, param_->grid_min_value);
+  costmap_.add(LayerName::obstacles, param_->grid_min_value);
   costmap_.add(LayerName::combined, param_->grid_min_value);
 }
 
-grid_map::Matrix CostmapGenerator::generatePointsCostmap(
+std::optional<grid_map::Matrix> CostmapGenerator::generatePointsCostmap(
   const sensor_msgs::msg::PointCloud2::ConstSharedPtr & in_points, const double vehicle_to_map_z)
 {
   geometry_msgs::msg::TransformStamped points2costmap;
@@ -366,6 +405,7 @@ grid_map::Matrix CostmapGenerator::generatePointsCostmap(
   } catch (const tf2::TransformException & ex) {
     RCLCPP_ERROR_THROTTLE(
       rclcpp::get_logger("costmap_generator"), *get_clock(), 1000, "%s", ex.what());
+    return std::nullopt;
   }
 
   const auto transformed_points = getTransformedPointCloud(*in_points, points2costmap.transform);
@@ -392,6 +432,7 @@ PredictedObjects::ConstSharedPtr transformObjects(
     objects2costmap = tf_buffer.lookupTransform(target_frame_id, src_frame_id, tf2::TimePointZero);
   } catch (const tf2::TransformException & ex) {
     RCLCPP_ERROR(rclcpp::get_logger("costmap_generator"), "%s", ex.what());
+    return nullptr;
   }
 
   for (auto & object : objects->objects) {
@@ -405,12 +446,15 @@ PredictedObjects::ConstSharedPtr transformObjects(
   return PredictedObjects::ConstSharedPtr(objects);
 }
 
-grid_map::Matrix CostmapGenerator::generateObjectsCostmap(
+std::optional<grid_map::Matrix> CostmapGenerator::generateObjectsCostmap(
   const PredictedObjects::ConstSharedPtr in_objects)
 {
   const auto object_frame = in_objects->header.frame_id;
   const auto transformed_objects =
     transformObjects(tf_buffer_, in_objects, param_->costmap_frame, object_frame);
+  if (!transformed_objects) {
+    return std::nullopt;
+  }
 
   grid_map::Matrix objects_costmap = objects2costmap_.makeCostmapFromObjects(
     costmap_, param_->expand_polygon_size, param_->size_of_expansion_kernel, transformed_objects);
@@ -418,7 +462,7 @@ grid_map::Matrix CostmapGenerator::generateObjectsCostmap(
   return objects_costmap;
 }
 
-grid_map::Matrix CostmapGenerator::generatePrimitivesCostmap()
+std::optional<grid_map::Matrix> CostmapGenerator::generatePrimitivesCostmap()
 {
   grid_map::GridMap lanelet2_costmap = costmap_;
   if (primitives_polygons_.empty()) {
@@ -431,6 +475,7 @@ grid_map::Matrix CostmapGenerator::generatePrimitivesCostmap()
       tf_buffer_.lookupTransform(param_->costmap_frame, param_->map_frame, tf2::TimePointZero);
   } catch (const tf2::TransformException & ex) {
     RCLCPP_ERROR(rclcpp::get_logger("costmap_generator"), "%s", ex.what());
+    return std::nullopt;
   }
 
   const auto transformed_primitives =
@@ -441,6 +486,33 @@ grid_map::Matrix CostmapGenerator::generatePrimitivesCostmap()
     param_->grid_min_value);
 
   return lanelet2_costmap[LayerName::primitives];
+}
+
+std::optional<grid_map::Matrix> CostmapGenerator::generateObstaclesCostmap()
+{
+  grid_map::GridMap lanelet2_costmap = costmap_;
+  if (obstacle_polygons_.empty()) {
+    return lanelet2_costmap[LayerName::obstacles];
+  }
+
+  geometry_msgs::msg::TransformStamped obstacles2costmap;
+  try {
+    obstacles2costmap =
+      tf_buffer_.lookupTransform(param_->costmap_frame, param_->map_frame, tf2::TimePointZero);
+  } catch (const tf2::TransformException & ex) {
+    RCLCPP_ERROR(rclcpp::get_logger("costmap_generator"), "%s", ex.what());
+    return std::nullopt;
+  }
+
+  const auto transformed_obstacles =
+    getTransformedPrimitives(obstacle_polygons_, obstacles2costmap);
+
+  // Fill obstacle areas with max cost (background = min cost)
+  object_map::fill_polygon_areas(
+    lanelet2_costmap, transformed_obstacles, LayerName::obstacles, param_->grid_min_value,
+    param_->grid_max_value);
+
+  return lanelet2_costmap[LayerName::obstacles];
 }
 
 grid_map::Matrix CostmapGenerator::generateCombinedCostmap()
@@ -455,6 +527,9 @@ grid_map::Matrix CostmapGenerator::generateCombinedCostmap()
 
   combined_costmap[LayerName::combined] =
     combined_costmap[LayerName::combined].cwiseMax(combined_costmap[LayerName::primitives]);
+
+  combined_costmap[LayerName::combined] =
+    combined_costmap[LayerName::combined].cwiseMax(combined_costmap[LayerName::obstacles]);
 
   combined_costmap[LayerName::combined] =
     combined_costmap[LayerName::combined].cwiseMax(combined_costmap[LayerName::objects]);

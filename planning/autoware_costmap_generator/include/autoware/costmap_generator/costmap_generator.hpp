@@ -71,6 +71,7 @@
 #include <tf2_ros/transform_listener.h>
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 class TestCostmapGenerator;
@@ -116,6 +117,7 @@ private:
   tf2_ros::TransformListener tf_listener_;
 
   std::vector<geometry_msgs::msg::Polygon> primitives_polygons_;
+  std::vector<geometry_msgs::msg::Polygon> obstacle_polygons_;
 
   PointsToCostmap points2costmap_{};
   ObjectsToCostmap objects2costmap_;
@@ -127,6 +129,7 @@ private:
     static constexpr const char * objects = "objects";
     static constexpr const char * points = "points";
     static constexpr const char * primitives = "primitives";
+    static constexpr const char * obstacles = "obstacles";
     static constexpr const char * combined = "combined";
   };
 
@@ -174,18 +177,33 @@ private:
     const lanelet::LaneletMapPtr lanelet_map,
     std::vector<geometry_msgs::msg::Polygon> & area_polygons);
 
+  /// \brief fill a vector with obstacle-type polygons from the lanelet map
+  /// \param [in] lanelet_map input lanelet map
+  /// \param [out] area_polygons polygon vector to fill
+  static void loadObstacleAreasFromLaneletMap(
+    const lanelet::LaneletMapPtr lanelet_map,
+    std::vector<geometry_msgs::msg::Polygon> & area_polygons);
+
   /// \brief calculate cost from pointcloud data
   /// \param[in] in_points: subscribed pointcloud data
   /// \param[in] vehicle_to_map_z: z value of the ego vehicle in the costmap frame
-  grid_map::Matrix generatePointsCostmap(
+  /// \return costmap on success, std::nullopt on TF failure
+  std::optional<grid_map::Matrix> generatePointsCostmap(
     const sensor_msgs::msg::PointCloud2::ConstSharedPtr & in_points, const double vehicle_to_map_z);
 
   /// \brief calculate cost from DynamicObjectArray
   /// \param[in] in_objects: subscribed DynamicObjectArray
-  grid_map::Matrix generateObjectsCostmap(const PredictedObjects::ConstSharedPtr in_objects);
+  /// \return costmap on success, std::nullopt on TF failure
+  std::optional<grid_map::Matrix> generateObjectsCostmap(
+    const PredictedObjects::ConstSharedPtr in_objects);
 
   /// \brief calculate cost from lanelet2 map
-  grid_map::Matrix generatePrimitivesCostmap();
+  /// \return costmap on success, std::nullopt on TF failure
+  std::optional<grid_map::Matrix> generatePrimitivesCostmap();
+
+  /// \brief calculate cost from obstacle-type polygons in the lanelet map
+  /// \return costmap on success, std::nullopt on TF failure
+  std::optional<grid_map::Matrix> generateObstaclesCostmap();
 
   /// \brief calculate cost for final output
   grid_map::Matrix generateCombinedCostmap();

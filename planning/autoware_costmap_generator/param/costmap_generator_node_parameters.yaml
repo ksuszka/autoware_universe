@@ -17,6 +17,9 @@ costmap_generator_node:
   use_parkinglot:
     type: bool
     description: Whether using parkinglot from ~input/vector_map or not
+  use_lanelet_obstacles:
+    type: bool
+    description: Whether marking polygons of type obstacle from ~input/vector_map as maximum cost
   costmap_frame:
     type: string
     description: Created costmap's coordinate
