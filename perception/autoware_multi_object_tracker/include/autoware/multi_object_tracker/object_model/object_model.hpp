@@ -274,19 +274,19 @@ public:
         process_noise.acc_long = const_g * 0.3;
         process_noise.acc_turn = deg2rad(30.0);
 
-        process_limit.vel_long_max = kmph2mps(45.0);
+        process_limit.vel_long_max = kmph2mps(20.0);
         process_limit.yaw_rate_max = deg2rad(30.0);
 
         // initial covariance
         initial_covariance.pos_x = sq(2.0);
         initial_covariance.pos_y = sq(2.0);
         initial_covariance.yaw = sq(deg2rad(1000.0));
-        initial_covariance.vel_long = sq(kmph2mps(45.0));
+        initial_covariance.vel_long = sq(kmph2mps(10.0));
         initial_covariance.yaw_rate = sq(deg2rad(360.0));
 
         // measurement noise model
-        measurement_covariance.pos_x = sq(0.4);
-        measurement_covariance.pos_y = sq(0.4);
+        measurement_covariance.pos_x = sq(0.7);
+        measurement_covariance.pos_y = sq(0.7);
         measurement_covariance.yaw = sq(deg2rad(30.0));
         measurement_covariance.vel_long = sq(kmph2mps(5.0));
         break;
