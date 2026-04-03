@@ -1857,7 +1857,9 @@ void fillObjectEnvelopePolygon(
 
   // keep multi-step envelope polygon.
   constexpr double THRESHOLD = 5.0;
-  if (envelope_polygon_area < object_polygon_area * THRESHOLD) {
+  const double min_reference_area = std::pow(2 * envelope_buffer_margin, 2);
+  const double effective_object_area = object_polygon_area + min_reference_area;
+  if (envelope_polygon_area < effective_object_area * THRESHOLD) {
     object_data.envelope_poly = multi_step_envelope_poly;
     return;
   }
