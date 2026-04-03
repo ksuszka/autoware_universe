@@ -1847,7 +1847,11 @@ void fillObjectEnvelopePolygon(
 
   const auto multi_step_envelope_poly = createEnvelopePolygon(unions.front(), closest_pose, 0.0);
 
-  const auto object_polygon = autoware_utils::to_polygon2d(object_data.object);
+  auto object_polygon = autoware_utils::to_polygon2d(object_data.object);
+  if (use_lanelet_for_clipping) {
+    object_polygon = clipObjectPolygonByLanelet(
+      object_polygon, object_data.overhang_lanelet, envelope_buffer_margin);
+  }
   const auto object_polygon_area = boost::geometry::area(object_polygon);
   const auto envelope_polygon_area = boost::geometry::area(multi_step_envelope_poly);
 
