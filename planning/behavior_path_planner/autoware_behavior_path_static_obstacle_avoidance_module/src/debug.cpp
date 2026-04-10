@@ -157,7 +157,8 @@ MarkerArray createObjectInfoMarkerArray(const ObjectDataArray & objects, std::st
                   << "stoppable:" << object.is_stoppable << " [-]\n"
                   << "stop_factor:" << object.to_stop_factor_distance << " [m]\n"
                   << "move_time:" << object.move_time << " [s]\n"
-                  << "stop_time:" << object.stop_time << " [s]\n";
+                  << "stop_time:" << object.stop_time << " [s]\n"
+                  << "shift_profile:" << magic_enum::enum_name(object.debug_shift_profile) << "\n";
     marker.text = string_stream.str();
     marker.color = create_marker_color(1.0, 1.0, 0.0, 0.999);
     marker.scale = create_marker_scale(0.5, 0.5, 0.5);

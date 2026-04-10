@@ -71,6 +71,24 @@ enum class ObjectInfo {
   LOST_OBJECT,
 };
 
+enum class ShiftProfile {
+  NONE = 0,
+  NOMINAL_CASE,
+  LATERAL_MARGIN_POLICY,
+  ENOUGH_SHIFT,
+  STOPPABLE_SHIFT,
+  APPROVED_SHIFT,
+  INSUFFICIENT_LONGITUDINAL_DISTANCE,
+  DESIRE_SHIFT_LENGTH,
+  ENOUGH_LATERAL_JERK,
+  DECELERATION_POLICY,
+  LESS_THAN_EXECUTION_THRESHOLD,
+  INSUFFICIENT_LONGITUDINAL_DISTANCE_BY_INFEASIBLE_MARGIN,
+  FEASIBLE_LATERAL_JERK,
+  INSUFFICIENT_LONGITUDINAL_DISTANCE_BY_SHIFT,
+  NEED_DECELERATION,
+};
+
 struct ObjectParameter
 {
   bool is_avoidance_target{false};
@@ -489,6 +507,9 @@ struct ObjectData  // avoidance target
 
   // object detail info
   ObjectInfo info{ObjectInfo::NONE};
+
+  // shift profile strategy (for debug purpose only)
+  ShiftProfile debug_shift_profile{ShiftProfile::NONE};
 
   // lateral avoid margin
   std::optional<double> avoid_margin{std::nullopt};

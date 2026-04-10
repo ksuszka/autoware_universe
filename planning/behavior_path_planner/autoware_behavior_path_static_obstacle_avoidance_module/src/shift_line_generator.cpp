@@ -145,46 +145,59 @@ AvoidOutlines ShiftLineGenerator::generateAvoidOutline(
 
     // nominal case. avoidable.
     if (has_enough_distance) {
+      object.debug_shift_profile = ShiftProfile::NOMINAL_CASE;
       return std::make_pair(desire_shift_length, avoidance_distance);
     }
 
     if (!isBestEffort(parameters_->policy_lateral_margin)) {
+      object.debug_shift_profile = ShiftProfile::LATERAL_MARGIN_POLICY;
       return std::make_pair(desire_shift_length, avoidance_distance);
     }
 
     // ego already has enough positive shift.
     const auto has_enough_positive_shift = avoiding_shift < -1e-3 && desire_shift_length > 1e-3;
     if (is_object_on_right && has_enough_positive_shift) {
+      object.debug_shift_profile = ShiftProfile::ENOUGH_SHIFT;
       return std::make_pair(desire_shift_length, avoidance_distance);
     }
 
     // ego already has enough negative shift.
     const auto has_enough_negative_shift = avoiding_shift > 1e-3 && desire_shift_length < -1e-3;
     if (!is_object_on_right && has_enough_negative_shift) {
+      object.debug_shift_profile = ShiftProfile::ENOUGH_SHIFT;
       return std::make_pair(desire_shift_length, avoidance_distance);
     }
 
     // don't relax shift length since it can stop in front of the object.
     if (object.is_stoppable && !parameters_->use_shorten_margin_immediately) {
+      object.debug_shift_profile = ShiftProfile::STOPPABLE_SHIFT;
       return std::make_pair(desire_shift_length, avoidance_distance);
     }
 
     // the avoidance path is already approved
     const double approved_shift = helper_->getShift(object.getPosition());
     if (approved_shift > 0.0 && is_object_on_right) {
+      if (object.debug_shift_profile == ShiftProfile::NONE) { // Don't cover another reason when it's set.
+        object.debug_shift_profile = ShiftProfile::APPROVED_SHIFT;
+      }
       return std::make_pair(std::min(std::abs(desire_shift_length), approved_shift), avoidance_distance);
     }
     if (approved_shift < 0.0 && !is_object_on_right) {
+      if (object.debug_shift_profile == ShiftProfile::NONE) { // Don't cover another reason when it's set.
+        object.debug_shift_profile = ShiftProfile::APPROVED_SHIFT;
+      }
       return std::make_pair(std::max(-std::abs(desire_shift_length), approved_shift), avoidance_distance);
     }
 
     // prepare distance is not enough. unavoidable.
     if (avoidance_distance < 1e-3) {
+      object.debug_shift_profile = ShiftProfile::INSUFFICIENT_LONGITUDINAL_DISTANCE;
       object.info = ObjectInfo::INSUFFICIENT_LONGITUDINAL_DISTANCE;
       return std::nullopt;
     }
 
     if (object.is_avoidable_by_desired_shift_length) {
+      object.debug_shift_profile = ShiftProfile::DESIRE_SHIFT_LENGTH;
       return std::make_pair(desire_shift_length, avoidance_distance);
     }
 
@@ -194,6 +207,7 @@ AvoidOutlines ShiftLineGenerator::generateAvoidOutline(
 
     // relax lateral jerk limit. avoidable.
     if (required_jerk < helper_->getLateralMaxJerkLimit()) {
+      object.debug_shift_profile = ShiftProfile::ENOUGH_LATERAL_JERK;
       object.is_avoidable_by_desired_shift_length = true;
       return std::make_pair(desire_shift_length, avoidance_distance);
     }
@@ -202,6 +216,7 @@ AvoidOutlines ShiftLineGenerator::generateAvoidOutline(
 
     // avoidance distance is not enough. unavoidable.
     if (!isBestEffort(parameters_->policy_deceleration)) {
+      object.debug_shift_profile = ShiftProfile::DECELERATION_POLICY;
       if (avoidance_distance < helper_->getMinAvoidanceDistance(avoiding_shift) + LON_DIST_BUFFER) {
         object.info = ObjectInfo::INSUFFICIENT_LONGITUDINAL_DISTANCE_BY_SHIFT;
         return std::nullopt;
@@ -216,6 +231,7 @@ AvoidOutlines ShiftLineGenerator::generateAvoidOutline(
       avoidance_distance, helper_->getLateralMaxJerkLimit(), helper_->getAvoidanceEgoSpeed());
 
     if (std::abs(feasible_relative_shift_length) < parameters_->lateral_execution_threshold) {
+      object.debug_shift_profile = ShiftProfile::LESS_THAN_EXECUTION_THRESHOLD;
       object.info = ObjectInfo::LESS_THAN_EXECUTION_THRESHOLD;
       return std::nullopt;
     }
@@ -233,6 +249,7 @@ AvoidOutlines ShiftLineGenerator::generateAvoidOutline(
       std::abs(feasible_shift_length - object.overhang_points.front().first) - LAT_DIST_BUFFER <
       0.5 * data_->parameters.vehicle_width + lateral_hard_margin;
     if (infeasible) {
+      object.debug_shift_profile = ShiftProfile::INSUFFICIENT_LONGITUDINAL_DISTANCE_BY_INFEASIBLE_MARGIN;
       object.info = ObjectInfo::INSUFFICIENT_LONGITUDINAL_DISTANCE_BY_INFEASIBLE_MARGIN;
       return std::nullopt;
     }
@@ -243,15 +260,18 @@ AvoidOutlines ShiftLineGenerator::generateAvoidOutline(
 
     // relax lateral jerk limit. avoidable.
     if (feasible_jerk < helper_->getLateralMaxJerkLimit()) {
+      object.debug_shift_profile = ShiftProfile::FEASIBLE_LATERAL_JERK;
       return std::make_pair(feasible_shift_length, avoidance_distance);
     }
 
     if (
       avoidance_distance <
       helper_->getMinAvoidanceDistance(feasible_relative_shift_length) + LON_DIST_BUFFER) {
+      object.debug_shift_profile = ShiftProfile::INSUFFICIENT_LONGITUDINAL_DISTANCE_BY_SHIFT;
       object.info = ObjectInfo::INSUFFICIENT_LONGITUDINAL_DISTANCE_BY_SHIFT;
       return std::nullopt;
     } else {
+      object.debug_shift_profile = ShiftProfile::NEED_DECELERATION;
       object.info = ObjectInfo::NEED_DECELERATION;
       return std::nullopt;
     }
