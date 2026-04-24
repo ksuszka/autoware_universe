@@ -20,13 +20,17 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include <autoware_planning_msgs/msg/trajectory.hpp>
+#include <diagnostic_msgs/msg/diagnostic_array.hpp>
 #include <nav_msgs/msg/occupancy_grid.hpp>
 
 #include <geometry_msgs/msg/pose.h>
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <limits>
 #include <memory>
+#include <optional>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -187,6 +191,41 @@ public:
     return {freespace_planner_->prev_target_index_, freespace_planner_->target_index_};
   }
 
+  std::optional<diagnostic_msgs::msg::DiagnosticStatus> force_diagnostic_update(
+    const bool scenario_available, const bool is_active)
+  {
+    auto test_node = std::make_shared<rclcpp::Node>("freespace_planner_diagnostic_test_node");
+    std::optional<diagnostic_msgs::msg::DiagnosticStatus> received_status;
+
+    const auto subscription = test_node->create_subscription<diagnostic_msgs::msg::DiagnosticArray>(
+      "/diagnostics", rclcpp::QoS{10},
+      [&received_status](const diagnostic_msgs::msg::DiagnosticArray::SharedPtr msg) {
+        for (const auto & status : msg->status) {
+          if (status.hardware_id == "freespace_planner") {
+            received_status = status;
+            break;
+          }
+        }
+      });
+
+    rclcpp::executors::SingleThreadedExecutor executor;
+    executor.add_node(test_node->get_node_base_interface());
+    executor.add_node(freespace_planner_->get_node_base_interface());
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!received_status && std::chrono::steady_clock::now() < deadline) {
+      freespace_planner_->diag_status_.setScenarioAvailable(scenario_available);
+      freespace_planner_->diag_status_.setActive(is_active);
+      freespace_planner_->diag_status_.forceUpdate();
+      executor.spin_some();
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    executor.remove_node(freespace_planner_->get_node_base_interface());
+    executor.remove_node(test_node->get_node_base_interface());
+    return received_status;
+  }
+
   void TearDown() override
   {
     freespace_planner_ = nullptr;
@@ -230,4 +269,22 @@ TEST_F(TestFreespacePlanner, testUpdateTargetIndex)
   std::tie(prev_target_index, target_index) = test_update_target_index(true, true);
   EXPECT_EQ(prev_target_index, reversing_indices.front());
   EXPECT_EQ(target_index, *std::next(reversing_indices.begin()));
+}
+
+TEST_F(TestFreespacePlanner, testInactiveDiagnosticStatusIsOk)
+{
+  const auto diagnostic_status = force_diagnostic_update(true, false);
+
+  ASSERT_TRUE(diagnostic_status.has_value());
+  EXPECT_EQ(diagnostic_status->level, diagnostic_msgs::msg::DiagnosticStatus::OK);
+  EXPECT_EQ(diagnostic_status->message, "Freespace Planner is inactive");
+}
+
+TEST_F(TestFreespacePlanner, testMissingScenarioDiagnosticStatusIsOk)
+{
+  const auto diagnostic_status = force_diagnostic_update(false, false);
+
+  ASSERT_TRUE(diagnostic_status.has_value());
+  EXPECT_EQ(diagnostic_status->level, diagnostic_msgs::msg::DiagnosticStatus::OK);
+  EXPECT_EQ(diagnostic_status->message, "Waiting for scenario");
 }

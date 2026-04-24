@@ -401,6 +401,7 @@ void FreespacePlannerNode::onTimer()
   autoware_utils::StopWatch<std::chrono::milliseconds> stop_watch;
 
   scenario_ = scenario_sub_.take_data();
+  diag_status_.setScenarioAvailable(static_cast<bool>(scenario_));
   diag_status_.setActive(utils::is_active(scenario_));
   diag_status_.forceUpdate();
 

@@ -115,26 +115,33 @@ public:
     updater_.add("freespace_planner_status", this, &FreespaceStatusUpdater::check);
   }
 
+  void setScenarioAvailable(bool available) noexcept { has_scenario_ = available; }
   void setActive(bool active) noexcept { is_active_ = active; }
   void onPlanResult(bool success) noexcept { last_plan_failed_ = !success; }
   void forceUpdate() { updater_.force_update(); }
 
 private:
   diagnostic_updater::Updater updater_;
+  bool has_scenario_{false};
   bool is_active_{false};
   bool last_plan_failed_{false};
 
   void check(diagnostic_updater::DiagnosticStatusWrapper & stat)
   {
+    if (!has_scenario_) {
+      stat.summary(diagnostic_msgs::msg::DiagnosticStatus::OK, "Waiting for scenario");
+      return;
+    }
+
     if (is_active_) {
       if (last_plan_failed_) {
         stat.summary(
-          diagnostic_msgs::msg::DiagnosticStatus::WARN, "Freespace Planner failed to find a path");
+          diagnostic_msgs::msg::DiagnosticStatus::ERROR, "Freespace Planner failed to find a path");
       } else {
         stat.summary(diagnostic_msgs::msg::DiagnosticStatus::OK, "Freespace Planner is active");
       }
     } else {
-      stat.summary(diagnostic_msgs::msg::DiagnosticStatus::STALE, "Freespace Planner is inactive");
+      stat.summary(diagnostic_msgs::msg::DiagnosticStatus::OK, "Freespace Planner is inactive");
     }
   }
 };
