@@ -176,17 +176,14 @@ AvoidOutlines ShiftLineGenerator::generateAvoidOutline(
 
     // the avoidance path is already approved
     const double approved_shift = helper_->getShift(object.getPosition());
-    if (approved_shift > 0.0 && is_object_on_right) {
+    if (
+      (is_object_on_right && approved_shift > 0.0 && approved_shift >= desire_shift_length) ||
+      (!is_object_on_right && approved_shift < 0.0 && approved_shift <= desire_shift_length)
+    ) {
       if (object.debug_shift_profile == ShiftProfile::NONE) { // Don't cover another reason when it's set.
         object.debug_shift_profile = ShiftProfile::APPROVED_SHIFT;
       }
-      return std::make_pair(std::min(std::abs(desire_shift_length), approved_shift), avoidance_distance);
-    }
-    if (approved_shift < 0.0 && !is_object_on_right) {
-      if (object.debug_shift_profile == ShiftProfile::NONE) { // Don't cover another reason when it's set.
-        object.debug_shift_profile = ShiftProfile::APPROVED_SHIFT;
-      }
-      return std::make_pair(std::max(-std::abs(desire_shift_length), approved_shift), avoidance_distance);
+      return std::make_pair(desire_shift_length, avoidance_distance);
     }
 
     // prepare distance is not enough. unavoidable.
