@@ -15,6 +15,12 @@
     parking_accuracy_tolerance: 0.5
     max_replan_count: 3
 
+    # -- Statistics Tracking --
+    stats_enabled: true
+    stats_report_on_session_end: true
+    stats_periodic_enabled: true
+    stats_periodic_cycles: 50
+
     # -- Configurations common to the all planners --
     # base configs
     time_limit: 30000.0

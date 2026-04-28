@@ -6,6 +6,7 @@ autoware_package()
 
 ament_auto_add_library(freespace_planner_node SHARED
   src/autoware_freespace_planner/freespace_planner_node.cpp
+  src/autoware_freespace_planner/planning_stats.cpp
   src/autoware_freespace_planner/stop_virtual_wall_manager.cpp
   src/autoware_freespace_planner/utils.cpp
 )
@@ -20,6 +21,7 @@ if(BUILD_TESTING)
     test/test_freespace_planner_node_interface.cpp
     test/test_freespace_planner_utils.cpp
     test/test_freespace_planner.cpp
+    test/test_planning_stats.cpp
   )
   target_link_libraries(test_${PROJECT_NAME}
     freespace_planner_node

@@ -44,8 +44,10 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <deque>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -132,6 +134,16 @@ FreespacePlannerNode::FreespacePlannerNode(const rclcpp::NodeOptions & node_opti
     p.replan_when_course_out = declare_parameter<bool>("replan_when_course_out");
     p.parking_accuracy_tolerance = declare_parameter<double>("parking_accuracy_tolerance");
     p.max_replan_count = declare_parameter<int>("max_replan_count");
+    p.stats_enabled = declare_parameter<bool>("stats_enabled");
+    p.stats_report_on_session_end = declare_parameter<bool>("stats_report_on_session_end");
+    p.stats_periodic_enabled = declare_parameter<bool>("stats_periodic_enabled");
+    p.stats_periodic_cycles = declare_parameter<int>("stats_periodic_cycles");
+
+    if (p.stats_periodic_cycles < 1) {
+      throw std::invalid_argument(
+        "stats_periodic_cycles must be >= 1. configured value: " +
+        std::to_string(p.stats_periodic_cycles));
+    }
   }
 
   // set vehicle_info
@@ -178,6 +190,17 @@ FreespacePlannerNode::FreespacePlannerNode(const rclcpp::NodeOptions & node_opti
   }
 
   logger_configure_ = std::make_unique<autoware_utils::LoggerLevelConfigure>(this);
+
+  overall_stats_.start_time = get_clock()->now();
+}
+
+FreespacePlannerNode::~FreespacePlannerNode() noexcept
+{
+  try {
+    reportOverallStats("shutdown");
+  } catch (...) {
+    // Destructor must not throw.
+  }
 }
 
 PlannerCommonParam FreespacePlannerNode::getPlannerCommonParam()
@@ -396,16 +419,126 @@ bool FreespacePlannerNode::isDataReady()
   return is_ready;
 }
 
+void FreespacePlannerNode::handleSessionTransition(const bool is_active_now)
+{
+  const bool was_active = session_stats_.is_active;
+  const bool session_transition_to_inactive = was_active && !is_active_now;
+  const bool session_transition_to_active = !was_active && is_active_now;
+
+  if (session_transition_to_inactive && node_param_.stats_enabled) {
+    if (node_param_.stats_report_on_session_end) {
+      reportSessionStats("end");
+    } else {
+      reportOverallStats("end");
+    }
+    session_stats_.resetStats();
+  }
+
+  if (session_transition_to_active && node_param_.stats_enabled) {
+    session_stats_.start_time = get_clock()->now();
+    session_stats_.resetStats();
+  }
+
+  session_stats_.is_active = is_active_now;
+}
+
+void FreespacePlannerNode::reportSessionStats(const std::string & session_type)
+{
+  if (!node_param_.stats_enabled) {
+    return;
+  }
+
+  const auto success_summary = session_stats_.success_stats.formatSummary();
+  const auto failure_summary = session_stats_.failure_stats.formatSummary();
+  const double session_duration_sec = (get_clock()->now() - session_stats_.start_time).seconds();
+
+  RCLCPP_INFO_STREAM(
+    get_logger(), "Freespace parking session ["
+                    << session_type << "]"
+                    << " duration=" << session_duration_sec << "s"
+                    << " - Success: " << success_summary << " | Failure: " << failure_summary
+                    << " | Total attempts: " << session_stats_.attempt_count);
+
+  reportOverallStats(session_type);
+}
+
+void FreespacePlannerNode::reportOverallStats(const std::string & trigger_type)
+{
+  if (!node_param_.stats_enabled) {
+    return;
+  }
+
+  const auto success_summary = overall_stats_.success_stats.formatSummary();
+  const auto failure_summary = overall_stats_.failure_stats.formatSummary();
+  const double uptime_sec = (get_clock()->now() - overall_stats_.start_time).seconds();
+
+  RCLCPP_INFO_STREAM(
+    get_logger(), "Freespace parking overall stats ["
+                    << trigger_type << "]"
+                    << " uptime=" << uptime_sec << "s"
+                    << " - Success: " << success_summary << " | Failure: " << failure_summary
+                    << " | Total attempts: " << overall_stats_.attempt_count);
+}
+
+void FreespacePlannerNode::updatePlanningStats(
+  const bool result, const PlanningStatsCollector::MillisecondsF & duration_ms)
+{
+  if (!node_param_.stats_enabled) {
+    return;
+  }
+
+  updateOverallPlanningStats(result, duration_ms);
+  updateSessionPlanningStats(result, duration_ms);
+}
+
+void FreespacePlannerNode::updateOverallPlanningStats(
+  const bool result, const PlanningStatsCollector::MillisecondsF & duration_ms)
+{
+  ++overall_stats_.attempt_count;
+  if (result) {
+    overall_stats_.success_stats.recordSample(duration_ms);
+  } else {
+    overall_stats_.failure_stats.recordSample(duration_ms);
+  }
+}
+
+void FreespacePlannerNode::updateSessionPlanningStats(
+  const bool result, const PlanningStatsCollector::MillisecondsF & duration_ms)
+{
+  if (!session_stats_.is_active) {
+    return;
+  }
+
+  ++session_stats_.attempt_count;
+
+  if (result) {
+    session_stats_.success_stats.recordSample(duration_ms);
+  } else {
+    session_stats_.failure_stats.recordSample(duration_ms);
+  }
+
+  const uint64_t periodic_cycles = static_cast<uint64_t>(node_param_.stats_periodic_cycles);
+  if (
+    node_param_.stats_periodic_enabled &&
+    (session_stats_.attempt_count - session_stats_.last_periodic_report_count) >= periodic_cycles) {
+    reportSessionStats("periodic");
+    session_stats_.last_periodic_report_count = session_stats_.attempt_count;
+  }
+}
+
 void FreespacePlannerNode::onTimer()
 {
   autoware_utils::StopWatch<std::chrono::milliseconds> stop_watch;
 
   scenario_ = scenario_sub_.take_data();
   diag_status_.setScenarioAvailable(static_cast<bool>(scenario_));
-  diag_status_.setActive(utils::is_active(scenario_));
+  const bool is_active_now = utils::is_active(scenario_);
+  diag_status_.setActive(is_active_now);
   diag_status_.forceUpdate();
 
-  if (!utils::is_active(scenario_)) {
+  handleSessionTransition(is_active_now);
+
+  if (!is_active_now) {
     reset();
     wall_manager_->onInactive();
     return;
@@ -532,7 +665,13 @@ void FreespacePlannerNode::planTrajectory()
   }
   const rclcpp::Time end = get_clock()->now();
 
-  RCLCPP_DEBUG(get_logger(), "Freespace planning: %f [s]", (end - start).seconds());
+  const auto duration_sec = std::chrono::duration<double>{(end - start).seconds()};
+  const auto duration_ms =
+    std::chrono::duration_cast<PlanningStatsCollector::MillisecondsF>(duration_sec);
+
+  RCLCPP_DEBUG(get_logger(), "Freespace planning: %f [s]", duration_sec.count());
+
+  updatePlanningStats(result, duration_ms);
 
   if (result) {
     RCLCPP_DEBUG(get_logger(), "Found goal!");

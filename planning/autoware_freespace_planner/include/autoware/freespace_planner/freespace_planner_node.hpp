@@ -31,6 +31,7 @@
 #ifndef AUTOWARE__FREESPACE_PLANNER__FREESPACE_PLANNER_NODE_HPP_
 #define AUTOWARE__FREESPACE_PLANNER__FREESPACE_PLANNER_NODE_HPP_
 
+#include "autoware/freespace_planner/planning_stats.hpp"
 #include "autoware/freespace_planner/stop_virtual_wall_manager.hpp"
 #include "autoware_utils/ros/logger_level_configure.hpp"
 
@@ -63,7 +64,6 @@
 #include <tf2_ros/transform_listener.h>
 
 #include <deque>
-#include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -104,6 +104,37 @@ struct NodeParam
   bool replan_when_course_out;
   double parking_accuracy_tolerance;
   int max_replan_count;
+  // Statistics tracking parameters
+  bool stats_enabled;
+  bool stats_report_on_session_end;
+  bool stats_periodic_enabled;
+  int stats_periodic_cycles;
+};
+
+struct ParkingSessionStatsContext
+{
+  bool is_active = false;
+  rclcpp::Time start_time;
+  uint64_t attempt_count = 0;
+  uint64_t last_periodic_report_count = 0;
+  PlanningStatsCollector success_stats;
+  PlanningStatsCollector failure_stats;
+
+  void resetStats() noexcept
+  {
+    attempt_count = 0;
+    last_periodic_report_count = 0;
+    success_stats.reset();
+    failure_stats.reset();
+  }
+};
+
+struct OverallPlanningStatsContext
+{
+  rclcpp::Time start_time;
+  uint64_t attempt_count = 0;
+  PlanningStatsCollector success_stats;
+  PlanningStatsCollector failure_stats;
 };
 
 class FreespaceStatusUpdater
@@ -150,6 +181,7 @@ class FreespacePlannerNode : public rclcpp::Node
 {
 public:
   explicit FreespacePlannerNode(const rclcpp::NodeOptions & node_options);
+  ~FreespacePlannerNode() noexcept override;
 
 private:
   // ros
@@ -211,6 +243,18 @@ private:
   // virtual wall
   std::unique_ptr<StopVirtualWallManager> wall_manager_;
 
+  // statistics tracking for parking planning session
+  ParkingSessionStatsContext session_stats_;
+  OverallPlanningStatsContext overall_stats_;
+
+  // Helper function to report session statistics
+  void reportSessionStats(const std::string & session_type);
+  void reportOverallStats(const std::string & trigger_type);
+  void updateOverallPlanningStats(
+    const bool result, const PlanningStatsCollector::MillisecondsF & duration_ms);
+  void updateSessionPlanningStats(
+    const bool result, const PlanningStatsCollector::MillisecondsF & duration_ms);
+
   // functions used in the constructor
   PlannerCommonParam getPlannerCommonParam();
 
@@ -219,6 +263,9 @@ private:
   void onOdometry(const Odometry::ConstSharedPtr msg);
 
   void onTimer();
+  void handleSessionTransition(const bool is_active_now);
+  void updatePlanningStats(
+    const bool result, const PlanningStatsCollector::MillisecondsF & duration_ms);
   void updateData();
   void reset();
   void planTrajectory();
