@@ -357,10 +357,17 @@ AvoidOutlines ShiftLineGenerator::generateAvoidOutline(
     // If there is an object that cannot be avoided, this module only avoids object on the same side
     // as unavoidable object.
     if (!unavoidable_objects.empty()) {
-      if (isOnRight(unavoidable_objects.front()) && !isOnRight(o)) {
+      const bool has_unavoidable_right = std::any_of(
+        unavoidable_objects.begin(), unavoidable_objects.end(),
+        [](const auto & u) { return isOnRight(u); });
+      const bool has_unavoidable_left = std::any_of(
+        unavoidable_objects.begin(), unavoidable_objects.end(),
+        [](const auto & u) { return !isOnRight(u); });
+
+      if (has_unavoidable_right && !isOnRight(o)) {
         break;
       }
-      if (!isOnRight(unavoidable_objects.front()) && isOnRight(o)) {
+      if (has_unavoidable_left && isOnRight(o)) {
         break;
       }
     }
