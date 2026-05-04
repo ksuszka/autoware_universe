@@ -111,6 +111,21 @@
           "type": "integer",
           "default": 9,
           "description": "The kernel size for blurring effect on object's costmap."
+        },
+        "objects_cost_mode": {
+          "type": "string",
+          "default": "classification_probability",
+          "enum": [
+            "classification_probability",
+            "existence_probability",
+            "fixed"
+          ],
+          "description": "Object cost source mode."
+        },
+        "fixed_objects_cost": {
+          "type": "number",
+          "default": 1.0,
+          "description": "Fixed object cost used when objects_cost_mode is fixed."
         }
       },
       "required": [
@@ -134,7 +149,9 @@
         "use_objects",
         "use_points",
         "expand_polygon_size",
-        "size_of_expansion_kernel"
+        "size_of_expansion_kernel",
+        "objects_cost_mode",
+        "fixed_objects_cost"
       ]
     }
   },

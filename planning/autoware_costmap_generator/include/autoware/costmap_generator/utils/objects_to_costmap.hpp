@@ -69,17 +69,23 @@ class ObjectsToCostmap
   friend class test::ObjectsToCostmapTestAccessor;
 
 public:
+  enum class ObjectCostMode { ClassificationProbability, ExistenceProbability, Fixed };
+  static constexpr float kLethalObjectCost = 1.0F;
+
   ObjectsToCostmap();
 
   /// \brief calculate cost from PredictedObjects
   /// \param[in] costmap: initialized gridmap
   /// \param[in] expand_polygon_size: expand object's costmap polygon
   /// \param[in] size_of_expansion_kernel: kernel size for blurring cost
+  /// \param[in] object_cost_mode: object cost source mode
+  /// \param[in] fixed_objects_cost: fixed object cost used when mode is "fixed"
   /// \param[in] in_objects: subscribed PredictedObjects
   /// \param[out] calculated cost in grid_map::Matrix format
   grid_map::Matrix makeCostmapFromObjects(
     const grid_map::GridMap & costmap, const double expand_polygon_size,
-    const int64_t size_of_expansion_kernel,
+    const int64_t size_of_expansion_kernel, const ObjectCostMode object_cost_mode,
+    const double fixed_objects_cost,
     const autoware_perception_msgs::msg::PredictedObjects::ConstSharedPtr in_objects);
 
 private:

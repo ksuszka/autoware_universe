@@ -64,3 +64,9 @@ costmap_generator_node:
   size_of_expansion_kernel:
     type: int
     description: Kernel size for blurring effect on object's costmap
+  objects_cost_mode:
+    type: string
+    description: Object cost source mode (classification_probability, existence_probability, fixed)
+  fixed_objects_cost:
+    type: double
+    description: Fixed object cost used when objects_cost_mode is fixed

@@ -174,7 +174,8 @@ void naive_mean_filter_on_grid_edges(
 
 grid_map::Matrix ObjectsToCostmap::makeCostmapFromObjects(
   const grid_map::GridMap & costmap, const double expand_polygon_size,
-  const int64_t size_of_expansion_kernel,
+  const int64_t size_of_expansion_kernel, const ObjectCostMode object_cost_mode,
+  const double fixed_objects_cost,
   const autoware_perception_msgs::msg::PredictedObjects::ConstSharedPtr in_objects)
 {
   grid_map::GridMap objects_costmap = costmap;
@@ -193,11 +194,24 @@ grid_map::Matrix ObjectsToCostmap::makeCostmapFromObjects(
         "Cylinder shapes are currently unsupported, falling back to BoundingBox.");
       polygon = makePolygonFromObjectBox(in_objects->header, object, expand_polygon_size);
     }
-    const auto highest_probability_label = *std::max_element(
-      object.classification.begin(), object.classification.end(),
-      [](const auto & c1, const auto & c2) { return c1.probability < c2.probability; });
-    setCostInPolygon(
-      polygon, OBJECTS_COSTMAP_LAYER_, highest_probability_label.probability, objects_costmap);
+    float object_cost = ObjectsToCostmap::kLethalObjectCost;
+    switch (object_cost_mode) {
+      case ObjectsToCostmap::ObjectCostMode::Fixed:
+        object_cost = static_cast<float>(fixed_objects_cost);
+        break;
+      case ObjectsToCostmap::ObjectCostMode::ExistenceProbability:
+        object_cost = object.existence_probability;
+        break;
+      case ObjectsToCostmap::ObjectCostMode::ClassificationProbability:
+        if (!object.classification.empty()) {
+          const auto highest_probability_label = *std::max_element(
+            object.classification.begin(), object.classification.end(),
+            [](const auto & c1, const auto & c2) { return c1.probability < c2.probability; });
+          object_cost = highest_probability_label.probability;
+        }
+        break;
+    }
+    setCostInPolygon(polygon, OBJECTS_COSTMAP_LAYER_, object_cost, objects_costmap);
   }
   objects_costmap.add(BLURRED_OBJECTS_COSTMAP_LAYER_, 0.0);
 

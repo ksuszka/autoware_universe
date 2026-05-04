@@ -186,7 +186,8 @@ TEST_F(ObjectsToCostMapTest, TestMakeCostmapFromObjects_BoxType)
   const double expand_polygon_size = 0.0;
   const double size_of_expansion_kernel = 1;  // do not expand for easy test check
   grid_map::Matrix objects_costmap = objectsToCostmap.makeCostmapFromObjects(
-    gridmap, expand_polygon_size, size_of_expansion_kernel, objs);
+    gridmap, expand_polygon_size, size_of_expansion_kernel,
+    ObjectsToCostmap::ObjectCostMode::ClassificationProbability, 1.0, objs);
 
   // yaw = 0,so we can just calculate like this easily
   int expected_non_empty_cost_grid_num =
@@ -250,7 +251,8 @@ TEST_F(ObjectsToCostMapTest, TestMakeCostmapFromObjects_PolygonType)
   const double expand_polygon_size = 0.0;
   const double size_of_expansion_kernel = 1;  // do not expand for easy test check
   grid_map::Matrix objects_costmap = objectsToCostmap.makeCostmapFromObjects(
-    gridmap, expand_polygon_size, size_of_expansion_kernel, objs);
+    gridmap, expand_polygon_size, size_of_expansion_kernel,
+    ObjectsToCostmap::ObjectCostMode::ClassificationProbability, 1.0, objs);
 
   // yaw = 0,so we can just calculate like this easily
   int expected_non_empty_cost_grid_num =
@@ -316,7 +318,8 @@ TEST_F(ObjectsToCostMapTest, TestMakeCostmapFromObjects_PolygonTypeYaw90Rotation
   const double expand_polygon_size = 0.0;
   const double size_of_expansion_kernel = 1;  // do not expand for easy test check
   grid_map::Matrix objects_costmap = objectsToCostmap.makeCostmapFromObjects(
-    gridmap, expand_polygon_size, size_of_expansion_kernel, objs);
+    gridmap, expand_polygon_size, size_of_expansion_kernel,
+    ObjectsToCostmap::ObjectCostMode::ClassificationProbability, 1.0, objs);
 
   grid_map::Index inside_index;
   ASSERT_TRUE(gridmap.getIndex(grid_map::Position(0.0, 2.0), inside_index));
@@ -357,7 +360,8 @@ TEST_F(ObjectsToCostMapTest, TestMakeCostmapFromObjects_PolygonTypeYaw45Rotation
   const double expand_polygon_size = 0.0;
   const double size_of_expansion_kernel = 1;  // do not expand for easy test check
   grid_map::Matrix objects_costmap = objectsToCostmap.makeCostmapFromObjects(
-    gridmap, expand_polygon_size, size_of_expansion_kernel, objs);
+    gridmap, expand_polygon_size, size_of_expansion_kernel,
+    ObjectsToCostmap::ObjectCostMode::ClassificationProbability, 1.0, objs);
 
   grid_map::Index inside_index;
   ASSERT_TRUE(gridmap.getIndex(grid_map::Position(1.0, 2.0), inside_index));
@@ -551,8 +555,9 @@ TEST_F(ObjectsToCostMapTest, TestExpandPolygonUniform_InMakeCostmapFromObjects)
   const double expand_polygon_size = 2.0;
   const int64_t size_of_expansion_kernel = 0;
 
-  const auto costmap_data =
-    obj2costmap.makeCostmapFromObjects(gridmap, expand_polygon_size, size_of_expansion_kernel, objects);
+  const auto costmap_data = obj2costmap.makeCostmapFromObjects(
+    gridmap, expand_polygon_size, size_of_expansion_kernel,
+    ObjectsToCostmap::ObjectCostMode::ClassificationProbability, 1.0, objects);
 
   // Count non-zero cells
   int occupied_cells = 0;

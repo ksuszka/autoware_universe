@@ -152,6 +152,23 @@ std::vector<geometry_msgs::msg::Polygon> getTransformedPrimitives(
   return out_polygons;
 }
 
+autoware::costmap_generator::ObjectsToCostmap::ObjectCostMode parseObjectCostMode(
+  const std::string & object_cost_mode, const rclcpp::Logger & logger)
+{
+  if (object_cost_mode == "fixed") {
+    return autoware::costmap_generator::ObjectsToCostmap::ObjectCostMode::Fixed;
+  }
+  if (object_cost_mode == "existence_probability") {
+    return autoware::costmap_generator::ObjectsToCostmap::ObjectCostMode::ExistenceProbability;
+  }
+  if (object_cost_mode != "classification_probability") {
+    RCLCPP_WARN(
+      logger, "Invalid objects_cost_mode '%s'. Falling back to 'classification_probability'.",
+      object_cost_mode.c_str());
+  }
+  return autoware::costmap_generator::ObjectsToCostmap::ObjectCostMode::ClassificationProbability;
+}
+
 }  // namespace
 
 namespace autoware::costmap_generator
@@ -456,8 +473,11 @@ std::optional<grid_map::Matrix> CostmapGenerator::generateObjectsCostmap(
     return std::nullopt;
   }
 
+  const auto object_cost_mode =
+    parseObjectCostMode(param_->objects_cost_mode, rclcpp::get_logger("costmap_generator"));
   grid_map::Matrix objects_costmap = objects2costmap_.makeCostmapFromObjects(
-    costmap_, param_->expand_polygon_size, param_->size_of_expansion_kernel, transformed_objects);
+    costmap_, param_->expand_polygon_size, param_->size_of_expansion_kernel, object_cost_mode,
+    param_->fixed_objects_cost, transformed_objects);
 
   return objects_costmap;
 }
