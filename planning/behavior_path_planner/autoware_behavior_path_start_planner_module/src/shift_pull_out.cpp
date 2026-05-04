@@ -24,10 +24,12 @@
 
 #include <autoware/motion_utils/trajectory/path_shift.hpp>
 #include <autoware_lanelet2_extension/utility/utilities.hpp>
+#include <tf2/LinearMath/Quaternion.hpp>
 
 #include <algorithm>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -395,13 +397,14 @@ std::vector<PullOutPath> ShiftPullOut::calcPullOutPaths(
     }
 
     // get shift end pose
-    const auto shift_end_pose_ptr = std::invoke([&]() {
-      const double s_start = arc_position_start.length + before_shifted_pull_out_distance;
-      const double s_end = s_start + std::numeric_limits<double>::epsilon();
-      const auto path = route_handler.getCenterLinePath(road_lanes, s_start, s_end, true);
-      return path.points.empty()
-               ? nullptr
-               : std::make_shared<geometry_msgs::msg::Pose>(path.points.front().point.pose);
+    const auto shift_end_pose_ptr = std::invoke([&]() -> std::optional<Pose> {
+      const double s = arc_position_start.length + before_shifted_pull_out_distance;
+      auto pose = route_handler.get_pose_from_2d_arc_length(road_lanes, s);
+      tf2::Quaternion q{pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w};
+      if (std::abs(q.length2() - 1.0) > 1e-6) { // Invalid pose.
+        return std::nullopt;
+      }
+      return pose;
     });
 
     if (!shift_end_pose_ptr) {

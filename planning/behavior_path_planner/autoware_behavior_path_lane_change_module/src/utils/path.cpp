@@ -422,17 +422,26 @@ LaneChangePath get_candidate_path(
     throw std::logic_error("Empty target reference!");
   }
 
-  const auto lc_end_pose = std::invoke([&]() {
+  const auto lc_end_pose = std::invoke([&]() -> std::optional<Pose> {
     const auto dist_to_lc_start =
       lanelet::utils::getArcCoordinates(target_lanes, lc_start_pose).length;
     const auto dist_to_lc_end = dist_to_lc_start + lc_metric.length;
-    return route_handler.get_pose_from_2d_arc_length(target_lanes, dist_to_lc_end);
+    auto pose = route_handler.get_pose_from_2d_arc_length(target_lanes, dist_to_lc_end);
+    tf2::Quaternion q{pose.orientation.x, pose.orientation.y, pose.orientation.z, pose.orientation.w};
+    if (std::abs(q.length2() - 1.0) > 1e-6) { // Invalid pose.
+      return std::nullopt;
+    }
+    return pose;
   });
 
-  const auto shift_line = get_lane_changing_shift_line(
-    lc_start_pose, lc_end_pose, target_lane_reference_path, shift_length);
+  if (!lc_end_pose) {
+    throw std::logic_error("End pose not found");
+  }
 
-  LaneChangeInfo lane_change_info{prep_metric, lc_metric, lc_start_pose, lc_end_pose, shift_line};
+  const auto shift_line = get_lane_changing_shift_line(
+    lc_start_pose, *lc_end_pose, target_lane_reference_path, shift_length);
+
+  LaneChangeInfo lane_change_info{prep_metric, lc_metric, lc_start_pose, *lc_end_pose, shift_line};
 
   if (
     lane_change_info.length.sum() + common_data_ptr->transient_data.next_dist_buffer.min >
