@@ -739,7 +739,7 @@ void PidLongitudinalController::updateControlState(const ControlData & control_d
       debug_msg_once("target speed > 0, but departure condition is not met. Keep STOPPED.");
     }
 
-    if (departure_condition_from_stopped) {
+    if (departure_condition_from_stopped && is_under_control) {
       // Let vehicle start after the steering is converged for dry steering
       const bool current_keep_stopped_condition =
         std::fabs(current_vel) < vel_epsilon && !lateral_sync_data_.is_steer_converged;
