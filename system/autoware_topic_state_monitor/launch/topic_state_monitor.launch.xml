@@ -9,6 +9,7 @@
   <arg name="error_rate" description="error rate[Hz]"/>
   <arg name="timeout" description="timeout period[s]"/>
   <arg name="window_size" default="10" description="window size"/>
+  <arg name="condition_topic" default="" description="optional std_msgs/Bool topic; monitor is OK while false"/>
 
   <node pkg="autoware_topic_state_monitor" exec="autoware_topic_state_monitor_node" name="topic_state_monitor_$(var node_name_suffix)" output="screen">
     <param name="topic" value="$(var topic)"/>
@@ -20,5 +21,6 @@
     <param name="error_rate" value="$(var error_rate)"/>
     <param name="timeout" value="$(var timeout)"/>
     <param name="window_size" value="$(var window_size)"/>
+    <param name="condition_topic" value="$(var condition_topic)"/>
   </node>
 </launch>

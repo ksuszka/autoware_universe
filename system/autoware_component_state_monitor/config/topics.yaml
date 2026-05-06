@@ -115,6 +115,20 @@
     error_rate: 1.0
     timeout: 1.0
 
+- module: planning
+  mode: [online, logging_simulation, planning_simulation]
+  type: autonomous
+  args:
+    node_name_suffix: parking_costmap_topic
+    topic: /planning/scenario_planning/parking/costmap_generator/occupancy_grid
+    topic_type: nav_msgs/msg/OccupancyGrid
+    best_effort: false
+    transient_local: false
+    warn_rate: 5.0
+    error_rate: 1.0
+    timeout: 1.0
+    condition_topic: /planning/scenario_planning/scenario_selector/is_parking_active
+
 - module: control
   mode: [online, logging_simulation, planning_simulation]
   type: autonomous

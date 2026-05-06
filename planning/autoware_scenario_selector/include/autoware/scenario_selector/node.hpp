@@ -99,6 +99,7 @@ private:
   rclcpp::Publisher<autoware_internal_planning_msgs::msg::Scenario>::SharedPtr pub_scenario_;
   rclcpp::Publisher<autoware_internal_debug_msgs::msg::Float64Stamped>::SharedPtr
     pub_processing_time_;
+  rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_is_parking_active_;
 
   // polling subscribers
   autoware_utils::InterProcessPollingSubscriber<

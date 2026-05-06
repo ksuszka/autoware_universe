@@ -12,6 +12,7 @@
       <arg name="input_operation_mode_state" value="/system/operation_mode/state"/>
       <arg name="output_scenario" value="/planning/scenario_planning/scenario"/>
       <arg name="output_trajectory" value="/planning/scenario_planning/scenario_selector/trajectory"/>
+      <arg name="output_is_parking_active" value="/planning/scenario_planning/scenario_selector/is_parking_active"/>
       <arg name="is_parking_completed" value="/planning/scenario_planning/parking/is_completed"/>
     </include>
   </group>

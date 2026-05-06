@@ -390,6 +390,10 @@ void ScenarioSelectorNode::onTimer()
 
   pub_scenario_->publish(scenario);
 
+  std_msgs::msg::Bool is_parking_active_msg;
+  is_parking_active_msg.data = isCurrentParking();
+  pub_is_parking_active_->publish(is_parking_active_msg);
+
   // Publish ProcessingTime
   autoware_internal_debug_msgs::msg::Float64Stamped processing_time_msg;
   processing_time_msg.stamp = get_clock()->now();
@@ -483,6 +487,8 @@ ScenarioSelectorNode::ScenarioSelectorNode(const rclcpp::NodeOptions & node_opti
     "output/scenario", rclcpp::QoS{1});
   pub_trajectory_ = this->create_publisher<autoware_planning_msgs::msg::Trajectory>(
     "output/trajectory", rclcpp::QoS{1});
+  pub_is_parking_active_ =
+    this->create_publisher<std_msgs::msg::Bool>("output/is_parking_active", rclcpp::QoS{1});
 
   // Timer Callback
   const auto period_ns = rclcpp::Rate(static_cast<double>(update_rate_)).period();

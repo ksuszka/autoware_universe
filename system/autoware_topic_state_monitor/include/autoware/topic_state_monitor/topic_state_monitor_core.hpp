@@ -20,6 +20,7 @@
 #include <diagnostic_updater/diagnostic_updater.hpp>
 #include <rclcpp/rclcpp.hpp>
 
+#include <std_msgs/msg/bool.hpp>
 #include <tf2_msgs/msg/tf_message.hpp>
 
 #include <deque>
@@ -38,9 +39,11 @@ struct NodeParam
   std::string topic_type;
   std::string frame_id;
   std::string child_frame_id;
+  std::string condition_topic;
   bool transient_local;
   bool best_effort;
   bool is_transform;
+  bool has_condition;
 };
 
 class TopicStateMonitorNode : public rclcpp::Node
@@ -64,6 +67,10 @@ private:
   // Subscriber
   rclcpp::GenericSubscription::SharedPtr sub_topic_;
   rclcpp::Subscription<tf2_msgs::msg::TFMessage>::SharedPtr sub_transform_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr sub_condition_;
+
+  // Condition state
+  bool is_condition_active_;
 
   // Timer
   void onTimer();

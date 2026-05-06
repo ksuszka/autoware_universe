@@ -37,7 +37,7 @@ void update_param(
 namespace autoware::topic_state_monitor
 {
 TopicStateMonitorNode::TopicStateMonitorNode(const rclcpp::NodeOptions & node_options)
-: Node("topic_state_monitor", node_options), updater_(this)
+: Node("topic_state_monitor", node_options), is_condition_active_(true), updater_(this)
 {
   using std::placeholders::_1;
 
@@ -47,6 +47,9 @@ TopicStateMonitorNode::TopicStateMonitorNode(const rclcpp::NodeOptions & node_op
   node_param_.transient_local = declare_parameter("transient_local", false);
   node_param_.best_effort = declare_parameter("best_effort", false);
   node_param_.diag_name = declare_parameter<std::string>("diag_name");
+  node_param_.condition_topic = declare_parameter<std::string>("condition_topic", "");
+  node_param_.has_condition = !node_param_.condition_topic.empty();
+  is_condition_active_ = !node_param_.has_condition;
   node_param_.is_transform = (node_param_.topic == "/tf" || node_param_.topic == "/tf_static");
 
   if (node_param_.is_transform) {
@@ -95,6 +98,12 @@ TopicStateMonitorNode::TopicStateMonitorNode(const rclcpp::NodeOptions & node_op
       [this]([[maybe_unused]] std::shared_ptr<rclcpp::SerializedMessage> msg) {
         topic_state_monitor_->update();
       });
+  }
+
+  if (node_param_.has_condition) {
+    sub_condition_ = this->create_subscription<std_msgs::msg::Bool>(
+      node_param_.condition_topic, rclcpp::QoS{1},
+      [this](std_msgs::msg::Bool::ConstSharedPtr msg) { is_condition_active_ = msg->data; });
   }
 
   // Diagnostic Updater
@@ -157,6 +166,17 @@ void TopicStateMonitorNode::checkTopicStatus(diagnostic_updater::DiagnosticStatu
   const auto print_info = [&](const std::string & msg) {
     RCLCPP_INFO_THROTTLE(get_logger(), *get_clock(), 3000, "%s", msg.c_str());
   };
+
+  if (node_param_.has_condition) {
+    stat.addf("condition_topic", "%s", node_param_.condition_topic.c_str());
+    stat.addf("condition_active", "%s", is_condition_active_ ? "true" : "false");
+  }
+
+  if (node_param_.has_condition && !is_condition_active_) {
+    stat.add("status", "InactiveByCondition");
+    stat.summary(DiagnosticStatus::OK, "OK");
+    return;
+  }
 
   // Judge level
   int8_t level = DiagnosticStatus::OK;

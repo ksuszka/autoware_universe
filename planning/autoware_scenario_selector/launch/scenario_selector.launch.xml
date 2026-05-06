@@ -9,6 +9,7 @@
 
   <arg name="output_scenario"/>
   <arg name="output_trajectory"/>
+  <arg name="output_is_parking_active"/>
   <!-- Parameter -->
   <arg name="config_file" default="$(find-pkg-share autoware_scenario_selector)/config/scenario_selector.param.yaml"/>
 
@@ -23,6 +24,7 @@
 
     <remap from="output/scenario" to="$(var output_scenario)"/>
     <remap from="output/trajectory" to="$(var output_trajectory)"/>
+    <remap from="output/is_parking_active" to="$(var output_is_parking_active)"/>
     <!-- Parameter -->
     <param from="$(var config_file)"/>
   </node>

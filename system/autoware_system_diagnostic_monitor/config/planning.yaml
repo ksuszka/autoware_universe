@@ -30,6 +30,7 @@ units:
     list:
       - { type: link, link: /planning/path_optimizer_emergency_stop-error }
       - { type: link, link: /planning/freespace_planner_status-error }
+      - { type: link, link: /planning/parking/costmap_topic_status-error }
 
   - path: /autoware/planning/routing/state
     type: diag
@@ -44,6 +45,11 @@ units:
   - path: /autoware/planning/topic_rate_check/trajectory
     type: diag
     node: topic_state_monitor_scenario_planning_trajectory
+    name: planning_topic_status
+
+  - path: /autoware/planning/parking/costmap_topic_status
+    type: diag
+    node: topic_state_monitor_parking_costmap_topic
     name: planning_topic_status
 
   - path: /autoware/planning/trajectory_validation/finite
@@ -119,3 +125,9 @@ units:
     node: freespace_planner
     name: freespace_planner_status
     timeout: 1.0
+
+  - path: /planning/parking/costmap_topic_status-error
+    type: warn-to-ok
+    item:
+      type: link
+      link: /autoware/planning/parking/costmap_topic_status
