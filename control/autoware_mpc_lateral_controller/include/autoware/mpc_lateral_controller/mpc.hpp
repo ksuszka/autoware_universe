@@ -123,6 +123,17 @@ struct MPCParam
 
   // Curvature threshold to determine when to use "low curvature" parameter settings.
   double low_curvature_thresh_curvature;
+
+  // Velocity-dependent scaling for the lateral error weight (lat_error / terminal_lat_error).
+  // The effective weight is multiplied by a factor that is piecewise-linearly interpolated
+  // between `lat_error_scale_low_vel` (at v <= lat_error_scale_low_vel_threshold) and
+  // `lat_error_scale_high_vel` (at v >= lat_error_scale_high_vel_threshold). The intent is to
+  // strongly track the trajectory at low speed, while reducing the weight at high speed to
+  // avoid steering oscillations.
+  double lat_error_scale_low_vel;
+  double lat_error_scale_high_vel;
+  double lat_error_scale_low_vel_threshold;
+  double lat_error_scale_high_vel_threshold;
 };
 
 struct TrajectoryFilteringParam
@@ -381,6 +392,40 @@ private:
     return std::fabs(curvature) < m_param.low_curvature_thresh_curvature
              ? m_param.low_curvature_weight
              : m_param.nominal_weight;
+  }
+
+  /**
+   * @brief Get the velocity-dependent scaling factor applied to the lateral error weight.
+   *        Uses a smoothstep (cubic Hermite) blend between `lat_error_scale_low_vel` at
+   *        `lat_error_scale_low_vel_threshold` and `lat_error_scale_high_vel` at
+   *        `lat_error_scale_high_vel_threshold`. The smoothstep is C1-continuous: the
+   *        derivative is zero at both thresholds (i.e. the curve is "rounded" at the ends),
+   *        which avoids the kinks that piecewise-linear interpolation would introduce when
+   *        the reference velocity hovers around a threshold.
+   * @param velocity Reference longitudinal velocity [m/s] (sign-independent).
+   * @return The scaling factor applied multiplicatively to the lateral error weight.
+   */
+  inline double getLatErrorVelocityScale(const double velocity) const
+  {
+    const double v = std::fabs(velocity);
+    const double v_lo = m_param.lat_error_scale_low_vel_threshold;
+    const double v_hi = m_param.lat_error_scale_high_vel_threshold;
+    const double s_lo = m_param.lat_error_scale_low_vel;
+    const double s_hi = m_param.lat_error_scale_high_vel;
+    if (v_hi <= v_lo) {
+      // Invalid configuration: fall back to the low-velocity scale to avoid div-by-zero.
+      return s_lo;
+    }
+    if (v <= v_lo) {
+      return s_lo;
+    }
+    if (v >= v_hi) {
+      return s_hi;
+    }
+    const double t = (v - v_lo) / (v_hi - v_lo);
+    // Smoothstep: 3t^2 - 2t^3, with zero derivative at t = 0 and t = 1.
+    const double smooth_t = t * t * (3.0 - 2.0 * t);
+    return s_lo + smooth_t * (s_hi - s_lo);
   }
 
   /**

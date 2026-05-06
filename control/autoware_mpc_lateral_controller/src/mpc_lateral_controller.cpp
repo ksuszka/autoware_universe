@@ -609,6 +609,14 @@ void MpcLateralController::declareMPCparameters(rclcpp::Node & node)
   m_mpc->m_param.acceleration_limit = dp("mpc_acceleration_limit");
   m_mpc->m_param.velocity_time_constant = dp("mpc_velocity_time_constant");
   m_mpc->m_param.min_prediction_length = dp("mpc_min_prediction_length");
+
+  // Velocity-dependent scaling for the lateral error weight.
+  m_mpc->m_param.lat_error_scale_low_vel = dp("mpc_weight_lat_error_scale_low_vel");
+  m_mpc->m_param.lat_error_scale_high_vel = dp("mpc_weight_lat_error_scale_high_vel");
+  m_mpc->m_param.lat_error_scale_low_vel_threshold =
+    dp("mpc_weight_lat_error_scale_low_vel_threshold");
+  m_mpc->m_param.lat_error_scale_high_vel_threshold =
+    dp("mpc_weight_lat_error_scale_high_vel_threshold");
 }
 
 rcl_interfaces::msg::SetParametersResult MpcLateralController::paramCallback(
@@ -658,6 +666,15 @@ rcl_interfaces::msg::SetParametersResult MpcLateralController::paramCallback(
     update_param(parameters, "mpc_acceleration_limit", param.acceleration_limit);
     update_param(parameters, "mpc_velocity_time_constant", param.velocity_time_constant);
     update_param(parameters, "mpc_min_prediction_length", param.min_prediction_length);
+
+    update_param(parameters, "mpc_weight_lat_error_scale_low_vel", param.lat_error_scale_low_vel);
+    update_param(parameters, "mpc_weight_lat_error_scale_high_vel", param.lat_error_scale_high_vel);
+    update_param(
+      parameters, "mpc_weight_lat_error_scale_low_vel_threshold",
+      param.lat_error_scale_low_vel_threshold);
+    update_param(
+      parameters, "mpc_weight_lat_error_scale_high_vel_threshold",
+      param.lat_error_scale_high_vel_threshold);
 
     // initialize input buffer
     update_param(parameters, "input_delay", param.input_delay);

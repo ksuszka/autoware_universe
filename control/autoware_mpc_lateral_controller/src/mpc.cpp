@@ -498,14 +498,15 @@ MPCMatrix MPC::generateMPCMatrix(
     Q = MatrixXd::Zero(DIM_Y, DIM_Y);
     R = MatrixXd::Zero(DIM_U, DIM_U);
     const auto mpc_weight = getWeight(ref_k);
-    Q(0, 0) = mpc_weight.lat_error;
+    const double lat_error_vel_scale = getLatErrorVelocityScale(ref_vx);
+    Q(0, 0) = mpc_weight.lat_error * lat_error_vel_scale;
     Q(1, 1) = mpc_weight.heading_error;
     R(0, 0) = mpc_weight.steering_input;
 
     Q_adaptive = Q;
     R_adaptive = R;
     if (i == N - 1) {
-      Q_adaptive(0, 0) = m_param.nominal_weight.terminal_lat_error;
+      Q_adaptive(0, 0) = m_param.nominal_weight.terminal_lat_error * lat_error_vel_scale;
       Q_adaptive(1, 1) = m_param.nominal_weight.terminal_heading_error;
     }
     Q_adaptive(1, 1) += ref_vx_squared * mpc_weight.heading_error_squared_vel;

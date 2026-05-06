@@ -134,6 +134,12 @@ protected:
     param.low_curvature_weight.steer_acc = 0.000001;
     param.low_curvature_thresh_curvature = 0.0;
 
+    // Default: no velocity-dependent scaling of the lateral error weight.
+    param.lat_error_scale_low_vel = 1.0;
+    param.lat_error_scale_high_vel = 1.0;
+    param.lat_error_scale_low_vel_threshold = 2.0;
+    param.lat_error_scale_high_vel_threshold = 10.0;
+
     trajectory_param.traj_resample_dist = 0.1;
     trajectory_param.path_filter_moving_ave_num = 35;
     trajectory_param.curvature_smoothing_num_traj = 1;

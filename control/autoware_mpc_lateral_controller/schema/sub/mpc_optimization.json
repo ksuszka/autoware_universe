@@ -135,6 +135,26 @@
           "type": "number",
           "description": "minimum prediction length",
           "default": 5.0
+        },
+        "mpc_weight_lat_error_scale_low_vel": {
+          "type": "number",
+          "description": "lateral error weight scaling factor at low velocity (multiplies mpc_weight_lat_error and mpc_weight_terminal_lat_error)",
+          "default": 1.0
+        },
+        "mpc_weight_lat_error_scale_high_vel": {
+          "type": "number",
+          "description": "lateral error weight scaling factor at high velocity (multiplies mpc_weight_lat_error and mpc_weight_terminal_lat_error)",
+          "default": 1.0
+        },
+        "mpc_weight_lat_error_scale_low_vel_threshold": {
+          "type": "number",
+          "description": "velocity [m/s] at and below which the low-velocity lateral error weight scale is fully applied",
+          "default": 2.0
+        },
+        "mpc_weight_lat_error_scale_high_vel_threshold": {
+          "type": "number",
+          "description": "velocity [m/s] at and above which the high-velocity lateral error weight scale is fully applied",
+          "default": 10.0
         }
       },
       "required": [
@@ -163,7 +183,11 @@
         "mpc_zero_ff_steer_deg",
         "mpc_acceleration_limit",
         "mpc_velocity_time_constant",
-        "mpc_min_prediction_length"
+        "mpc_min_prediction_length",
+        "mpc_weight_lat_error_scale_low_vel",
+        "mpc_weight_lat_error_scale_high_vel",
+        "mpc_weight_lat_error_scale_low_vel_threshold",
+        "mpc_weight_lat_error_scale_high_vel_threshold"
       ],
       "additionalProperties": false
     }

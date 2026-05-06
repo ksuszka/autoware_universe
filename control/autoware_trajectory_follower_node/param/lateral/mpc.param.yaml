@@ -42,6 +42,17 @@
     mpc_velocity_time_constant: 0.3              # time constant used for velocity smoothing
     mpc_min_prediction_length: 5.0               # minimum prediction length
 
+    # -- velocity-dependent scaling for lateral error weight (lat_error and terminal_lat_error) --
+    # Scale is smoothly interpolated (cubic smoothstep, C1-continuous, flat at the endpoints)
+    # between (low_vel_threshold -> low_vel_scale) and (high_vel_threshold -> high_vel_scale),
+    # and clamped outside that range. Defaults of 1.0 preserve the original constant behavior;
+    # lower the high-vel scale to reduce oscillations at higher speeds while keeping tighter
+    # tracking at low speed.
+    mpc_weight_lat_error_scale_low_vel: 1.0
+    mpc_weight_lat_error_scale_high_vel: 1.0
+    mpc_weight_lat_error_scale_low_vel_threshold: 2.00 # [m/s]
+    mpc_weight_lat_error_scale_high_vel_threshold: 10.00 # [m/s]
+
     # -- vehicle model --
     vehicle_model_type: "kinematics" # vehicle model type for mpc prediction. option is kinematics, kinematics_no_delay, and dynamics
     input_delay: 0.24                # steering input delay time for delay compensation
