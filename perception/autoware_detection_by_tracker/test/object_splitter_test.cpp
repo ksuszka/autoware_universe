@@ -281,7 +281,8 @@ protected:
 
     object_splitter_ = std::make_unique<ObjectSplitter>(
       max_search_distance_map_, tracker_ignore_, shape_estimator_, cluster_, extend_scale_,
-      buffer_distance_, existence_probability_threshold_, existence_probability_modifier_, logger_);
+      buffer_distance_, existence_probability_threshold_, existence_probability_modifier_,
+      false, logger_);
   }
 
   // Helper methods to create test data

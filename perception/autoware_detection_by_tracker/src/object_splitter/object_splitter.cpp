@@ -53,6 +53,7 @@ ObjectSplitter::ObjectSplitter(
   const std::shared_ptr<autoware::euclidean_cluster::EuclideanClusterInterface> & cluster,
   const double extend_scale, const double buffer_distance,
   const double existence_probability_threshold, const double existence_probability_modifier,
+  const bool fast_spawn_unknown_clusters,
   const rclcpp::Logger & logger)
 : max_search_distance_map_(max_search_distance_map),
   tracker_ignore_(tracker_ignore),
@@ -62,6 +63,7 @@ ObjectSplitter::ObjectSplitter(
   buffer_distance_(buffer_distance),
   existence_probability_threshold_(existence_probability_threshold),
   existence_probability_modifier_(existence_probability_modifier),
+  fast_spawn_unknown_clusters_(fast_spawn_unknown_clusters),
   logger_(logger)
 {
 }
@@ -304,7 +306,7 @@ DetectedObjects ObjectSplitter::clusterObjectsToDetectedObjects(
     // Only add objects with valid footprints
     if (!out_object.shape.footprint.points.empty()) {
       // Set object properties
-      out_object.existence_probability = 1.0;
+      out_object.existence_probability = fast_spawn_unknown_clusters_ ? 1.0 : 0.0;
 
       // Set classification as UNKNOWN
       auto unknown_label = Label{};

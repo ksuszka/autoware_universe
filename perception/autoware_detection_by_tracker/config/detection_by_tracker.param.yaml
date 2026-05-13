@@ -15,3 +15,6 @@
     buffer_distance: 0.1 # Buffer distance for the polygon of the small objects
     existence_probability_threshold: 0.08 # Threshold for existence probability to update the tracked object
     existence_probability_modifier: 0.5 # Modifier for existence probability to update the tracked object
+    fast_spawn_unknown_clusters: false  # If true, new UNKNOWN clusters get existence_probability=1.0 and
+                                        # can be tracked immediately. If false, existence_probability=0.0 and
+                                        # the isLargerThanChild size gate applies, matching plain clustering detections.

@@ -95,6 +95,7 @@ public:
     const std::shared_ptr<autoware::euclidean_cluster::EuclideanClusterInterface> & cluster,
     const double extend_scale, const double buffer_distance,
     const double existence_probability_threshold, const double existence_probability_modifier,
+    const bool fast_spawn_unknown_clusters,
     const rclcpp::Logger & logger);
 
   /**
@@ -266,6 +267,7 @@ private:
   double buffer_distance_;
   double existence_probability_threshold_;
   double existence_probability_modifier_;
+  bool fast_spawn_unknown_clusters_;
   rclcpp::Logger logger_;
 };
 

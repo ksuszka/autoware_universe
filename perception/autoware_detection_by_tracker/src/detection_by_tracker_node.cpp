@@ -92,11 +92,13 @@ DetectionByTracker::DetectionByTracker(const rclcpp::NodeOptions & node_options)
       declare_parameter<double>("existence_probability_threshold", 0.08);
     existence_probability_modifier_ =
       declare_parameter<double>("existence_probability_modifier", 0.5);
+    const bool fast_spawn_unknown_clusters =
+      declare_parameter<bool>("fast_spawn_unknown_clusters", false);
     object_splitter_ = std::make_shared<ObjectSplitter>(
       max_search_distance_for_divider_, tracker_ignore_,
       autoware::shape_estimation::ShapeEstimator{false, true}, cluster_, extend_scale_,
       buffer_distance_, existence_probability_threshold_, existence_probability_modifier_,
-      this->get_logger());
+      fast_spawn_unknown_clusters, this->get_logger());
   }
   debugger_ = std::make_shared<Debugger>(this);
   published_time_publisher_ = std::make_unique<autoware_utils::PublishedTimePublisher>(this);
