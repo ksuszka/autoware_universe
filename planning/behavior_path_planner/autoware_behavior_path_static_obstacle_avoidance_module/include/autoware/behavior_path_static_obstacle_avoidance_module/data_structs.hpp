@@ -129,6 +129,10 @@ struct AvoidanceParameters
   // if this param is true, it reverts avoidance path when the path is no longer needed.
   bool enable_cancel_maneuver{false};
 
+  // grace period [s] to keep avoidance module alive after the last target object disappears.
+  // prevents unnecessary cancel/reset cycles.
+  double grace_period{0.0};
+
   double force_deactivate_duration_time{0.0};
 
   // enable avoidance for all parking vehicle

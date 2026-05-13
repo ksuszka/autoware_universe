@@ -39,6 +39,7 @@ AvoidanceParameters getParameter(rclcpp::Node * node)
       get_or_declare_parameter<double>(*node, ns + "resample_interval_for_planning");
     p.resample_interval_for_output =
       get_or_declare_parameter<double>(*node, ns + "resample_interval_for_output");
+    p.grace_period = get_or_declare_parameter<double>(*node, ns + "grace_period");
     p.path_generation_method =
       get_or_declare_parameter<std::string>(*node, ns + "path_generation_method");
     p.keep_shift_line_in_backward_path =

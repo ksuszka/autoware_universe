@@ -16,6 +16,10 @@
       use_hatched_road_markings: true
       use_freespace_areas: true
 
+      # grace period [s] to keep module alive after the last avoidance target disappears.
+      # prevents unnecessary cancel/reset cycles when objects temporarily vanish from detection.
+      grace_period: 5.0                               # [s]
+
       # avoidance is performed for the object type with true
       target_object:
         car:

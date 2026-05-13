@@ -130,7 +130,21 @@ AvoidanceState StaticObstacleAvoidanceModule::getCurrentModuleState(
     [this](const auto & o) { return !helper_->isAbsolutelyNotAvoidable(o); });
 
   if (has_avoidance_target) {
+    last_target_seen_time_ = clock_->now();
     return AvoidanceState::RUNNING;
+  }
+
+  // Grace period: keep module alive for a while after the last target disappears to avoid
+  // unnecessary cancel/reset cycles when objects temporarily vanish from detection.
+  if (parameters_->grace_period > 0.0 && last_target_seen_time_.has_value()) {
+    const double elapsed = (clock_->now() - last_target_seen_time_.value()).seconds();
+    if (elapsed < parameters_->grace_period) {
+      RCLCPP_DEBUG_THROTTLE(
+        getLogger(), *clock_, 1000,
+        "no avoidance target but within grace period (%.1f/%.1f s). keep RUNNING.",
+        elapsed, parameters_->grace_period);
+      return AvoidanceState::RUNNING;
+    }
   }
 
   // If the ego is on the shift line, keep RUNNING.
@@ -1681,6 +1695,7 @@ void StaticObstacleAvoidanceModule::initVariables()
   resetPathReference();
   arrived_path_end_ = false;
   ignore_signal_ids_.clear();
+  last_target_seen_time_ = std::nullopt;
 }
 
 void StaticObstacleAvoidanceModule::initRTCStatus()

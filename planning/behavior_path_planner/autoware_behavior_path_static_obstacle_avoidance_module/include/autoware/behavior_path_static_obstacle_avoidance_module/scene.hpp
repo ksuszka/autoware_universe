@@ -571,6 +571,9 @@ private:
 
   bool force_deactivated_{false};
   rclcpp::Time last_deactivation_triggered_time_;
+
+  // tracks the last time an avoidance target was present, used for cancel grace period
+  mutable std::optional<rclcpp::Time> last_target_seen_time_;
 };
 
 }  // namespace autoware::behavior_path_planner
