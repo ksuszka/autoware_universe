@@ -187,7 +187,7 @@ TEST_F(ObjectsToCostMapTest, TestMakeCostmapFromObjects_BoxType)
   const double size_of_expansion_kernel = 1;  // do not expand for easy test check
   grid_map::Matrix objects_costmap = objectsToCostmap.makeCostmapFromObjects(
     gridmap, expand_polygon_size, size_of_expansion_kernel,
-    ObjectsToCostmap::ObjectCostMode::ClassificationProbability, 1.0, objs);
+    ObjectsToCostmap::ObjectCostMode::ClassificationProbability, 1.0, {}, objs);
 
   // yaw = 0,so we can just calculate like this easily
   int expected_non_empty_cost_grid_num =
@@ -252,7 +252,7 @@ TEST_F(ObjectsToCostMapTest, TestMakeCostmapFromObjects_PolygonType)
   const double size_of_expansion_kernel = 1;  // do not expand for easy test check
   grid_map::Matrix objects_costmap = objectsToCostmap.makeCostmapFromObjects(
     gridmap, expand_polygon_size, size_of_expansion_kernel,
-    ObjectsToCostmap::ObjectCostMode::ClassificationProbability, 1.0, objs);
+    ObjectsToCostmap::ObjectCostMode::ClassificationProbability, 1.0, {}, objs);
 
   // yaw = 0,so we can just calculate like this easily
   int expected_non_empty_cost_grid_num =
@@ -319,12 +319,12 @@ TEST_F(ObjectsToCostMapTest, TestMakeCostmapFromObjects_PolygonTypeYaw90Rotation
   const double size_of_expansion_kernel = 1;  // do not expand for easy test check
   grid_map::Matrix objects_costmap = objectsToCostmap.makeCostmapFromObjects(
     gridmap, expand_polygon_size, size_of_expansion_kernel,
-    ObjectsToCostmap::ObjectCostMode::ClassificationProbability, 1.0, objs);
+    ObjectsToCostmap::ObjectCostMode::ClassificationProbability, 1.0, {}, objs);
 
   grid_map::Index inside_index;
   ASSERT_TRUE(gridmap.getIndex(grid_map::Position(0.0, 2.0), inside_index));
-  EXPECT_DOUBLE_EQ(objects_costmap(inside_index.x(), inside_index.y()),
-    object.classification.at(0).probability);
+  EXPECT_DOUBLE_EQ(
+    objects_costmap(inside_index.x(), inside_index.y()), object.classification.at(0).probability);
 
   grid_map::Index outside_index;
   ASSERT_TRUE(gridmap.getIndex(grid_map::Position(2.0, 0.0), outside_index));
@@ -361,12 +361,12 @@ TEST_F(ObjectsToCostMapTest, TestMakeCostmapFromObjects_PolygonTypeYaw45Rotation
   const double size_of_expansion_kernel = 1;  // do not expand for easy test check
   grid_map::Matrix objects_costmap = objectsToCostmap.makeCostmapFromObjects(
     gridmap, expand_polygon_size, size_of_expansion_kernel,
-    ObjectsToCostmap::ObjectCostMode::ClassificationProbability, 1.0, objs);
+    ObjectsToCostmap::ObjectCostMode::ClassificationProbability, 1.0, {}, objs);
 
   grid_map::Index inside_index;
   ASSERT_TRUE(gridmap.getIndex(grid_map::Position(1.0, 2.0), inside_index));
-  EXPECT_DOUBLE_EQ(objects_costmap(inside_index.x(), inside_index.y()),
-    object.classification.at(0).probability);
+  EXPECT_DOUBLE_EQ(
+    objects_costmap(inside_index.x(), inside_index.y()), object.classification.at(0).probability);
 
   grid_map::Index outside_index;
   ASSERT_TRUE(gridmap.getIndex(grid_map::Position(2.0, 0.0), outside_index));
@@ -399,7 +399,8 @@ TEST_F(ObjectsToCostMapTest, TestMakePolygonFromObjectConvexHull_WithExpansion)
 
   // Test with no expansion
   const double no_expansion = 0.0;
-  auto polygon_no_expansion = accessor.makePolygonFromObjectConvexHull(header, object, no_expansion);
+  auto polygon_no_expansion =
+    accessor.makePolygonFromObjectConvexHull(header, object, no_expansion);
 
   // Test with expansion
   const double expansion_size = 0.5;
@@ -463,7 +464,7 @@ TEST_F(ObjectsToCostMapTest, TestMakePolygonFromObjectConvexHull_NoExpansionWhen
   // Calculate centroid correctly by excluding the duplicate closing vertex if present
   double sum_x = 0.0, sum_y = 0.0;
   size_t count = polygon.nVertices();
-  
+
   // Check if last vertex is duplicate of first (polygon closing point)
   if (count > 1) {
     const auto & first = polygon.getVertex(0);
@@ -557,7 +558,7 @@ TEST_F(ObjectsToCostMapTest, TestExpandPolygonUniform_InMakeCostmapFromObjects)
 
   const auto costmap_data = obj2costmap.makeCostmapFromObjects(
     gridmap, expand_polygon_size, size_of_expansion_kernel,
-    ObjectsToCostmap::ObjectCostMode::ClassificationProbability, 1.0, objects);
+    ObjectsToCostmap::ObjectCostMode::ClassificationProbability, 1.0, {}, objects);
 
   // Count non-zero cells
   int occupied_cells = 0;
@@ -617,4 +618,193 @@ TEST_F(ObjectsToCostMapTest, TestMakePolygonFromObjectConvexHull_NoExpansion_Not
     }
   }
 }
+}  // namespace autoware::costmap_generator
+
+// ─── Tests for labelFromString ────────────────────────────────────────────────
+
+namespace autoware::costmap_generator
+{
+using LABEL = autoware_perception_msgs::msg::ObjectClassification;
+
+TEST(LabelFromStringTest, KnownLabels)
+{
+  EXPECT_EQ(ObjectsToCostmap::labelFromString("unknown"), LABEL::UNKNOWN);
+  EXPECT_EQ(ObjectsToCostmap::labelFromString("car"), LABEL::CAR);
+  EXPECT_EQ(ObjectsToCostmap::labelFromString("truck"), LABEL::TRUCK);
+  EXPECT_EQ(ObjectsToCostmap::labelFromString("bus"), LABEL::BUS);
+  EXPECT_EQ(ObjectsToCostmap::labelFromString("trailer"), LABEL::TRAILER);
+  EXPECT_EQ(ObjectsToCostmap::labelFromString("motorcycle"), LABEL::MOTORCYCLE);
+  EXPECT_EQ(ObjectsToCostmap::labelFromString("bicycle"), LABEL::BICYCLE);
+  EXPECT_EQ(ObjectsToCostmap::labelFromString("pedestrian"), LABEL::PEDESTRIAN);
+}
+
+TEST(LabelFromStringTest, UnknownStringFallsBackToUnknown)
+{
+  EXPECT_EQ(ObjectsToCostmap::labelFromString(""), LABEL::UNKNOWN);
+  EXPECT_EQ(ObjectsToCostmap::labelFromString("CAR"), LABEL::UNKNOWN);  // case-sensitive
+  EXPECT_EQ(ObjectsToCostmap::labelFromString("not_a_type"), LABEL::UNKNOWN);
+}
+
+// ─── Tests for object-label filtering in makeCostmapFromObjects ───────────────
+
+class ObjectLabelFilterTest : public ::testing::Test
+{
+protected:
+  void SetUp() override { rclcpp::init(0, nullptr); }
+  ~ObjectLabelFilterTest() override { rclcpp::shutdown(); }
+
+  grid_map::GridMap make_gridmap()
+  {
+    grid_map::GridMap gm;
+    gm.setFrameId("map");
+    gm.setGeometry(grid_map::Length(21.0, 21.0), 1.0, grid_map::Position(0.0, 0.0));
+    gm.add("objects", 0.0);
+    return gm;
+  }
+
+  // Returns a bounding-box object centred at (0,0) with given label.
+  static autoware_perception_msgs::msg::PredictedObjects::SharedPtr make_objects(
+    uint8_t label, float probability = 0.9f)
+  {
+    auto objs = std::make_shared<autoware_perception_msgs::msg::PredictedObjects>();
+    objs->header.frame_id = "map";
+
+    autoware_perception_msgs::msg::PredictedObject obj;
+    autoware_perception_msgs::msg::ObjectClassification cls;
+    cls.label = label;
+    cls.probability = probability;
+    obj.classification.push_back(cls);
+    obj.kinematics.initial_pose_with_covariance.pose.position.x = 0.0;
+    obj.kinematics.initial_pose_with_covariance.pose.position.y = 0.0;
+    obj.kinematics.initial_pose_with_covariance.pose.orientation.w = 1.0;
+    obj.shape.type = autoware_perception_msgs::msg::Shape::BOUNDING_BOX;
+    obj.shape.dimensions.x = 4.0;
+    obj.shape.dimensions.y = 2.0;
+    obj.shape.dimensions.z = 1.5;
+
+    objs->objects.push_back(obj);
+    return objs;
+  }
+
+  static int count_nonzero(const grid_map::Matrix & m)
+  {
+    int n = 0;
+    for (int i = 0; i < m.rows(); ++i)
+      for (int j = 0; j < m.cols(); ++j)
+        if (m(i, j) > 0.0f) ++n;
+    return n;
+  }
+};
+
+// Object whose label is NOT in the excluded set → cells should be filled.
+TEST_F(ObjectLabelFilterTest, NonExcludedLabelProducesCost)
+{
+  const std::unordered_set<uint8_t> excluded = {LABEL::TRUCK};
+  auto objs = make_objects(LABEL::CAR);
+
+  ObjectsToCostmap obj2costmap;
+  const auto costmap = obj2costmap.makeCostmapFromObjects(
+    make_gridmap(), 0.0, 1, ObjectsToCostmap::ObjectCostMode::Fixed, 1.0, excluded, objs);
+
+  EXPECT_GT(count_nonzero(costmap), 0)
+    << "CAR object should produce cost when only TRUCK is excluded";
+}
+
+// Object whose label IS in the excluded set → costmap stays empty.
+TEST_F(ObjectLabelFilterTest, ExcludedLabelProducesNoCost)
+{
+  const std::unordered_set<uint8_t> excluded = {LABEL::UNKNOWN, LABEL::PEDESTRIAN};
+  auto objs = make_objects(LABEL::UNKNOWN);
+
+  ObjectsToCostmap obj2costmap;
+  const auto costmap = obj2costmap.makeCostmapFromObjects(
+    make_gridmap(), 0.0, 1, ObjectsToCostmap::ObjectCostMode::Fixed, 1.0, excluded, objs);
+
+  EXPECT_EQ(count_nonzero(costmap), 0)
+    << "UNKNOWN object should be skipped when UNKNOWN is in excluded set";
+}
+
+// Empty excluded set means no filtering → all objects pass through.
+TEST_F(ObjectLabelFilterTest, EmptyExcludedSetPassesAllObjects)
+{
+  const std::unordered_set<uint8_t> no_filter = {};
+  auto objs = make_objects(LABEL::UNKNOWN);
+
+  ObjectsToCostmap obj2costmap;
+  const auto costmap = obj2costmap.makeCostmapFromObjects(
+    make_gridmap(), 0.0, 1, ObjectsToCostmap::ObjectCostMode::Fixed, 1.0, no_filter, objs);
+
+  EXPECT_GT(count_nonzero(costmap), 0) << "Empty excluded set should pass all objects";
+}
+
+// Object with multiple classifications: dominant (highest-probability) label decides.
+TEST_F(ObjectLabelFilterTest, DominantLabelDeterminesFiltering)
+{
+  auto objs = std::make_shared<autoware_perception_msgs::msg::PredictedObjects>();
+  objs->header.frame_id = "map";
+
+  autoware_perception_msgs::msg::PredictedObject obj;
+  // Two classifications: PEDESTRIAN 0.3, UNKNOWN 0.8 → dominant is UNKNOWN
+  autoware_perception_msgs::msg::ObjectClassification cls_ped;
+  cls_ped.label = LABEL::PEDESTRIAN;
+  cls_ped.probability = 0.3f;
+  autoware_perception_msgs::msg::ObjectClassification cls_unk;
+  cls_unk.label = LABEL::UNKNOWN;
+  cls_unk.probability = 0.8f;
+  obj.classification = {cls_ped, cls_unk};
+  obj.kinematics.initial_pose_with_covariance.pose.orientation.w = 1.0;
+  obj.shape.type = autoware_perception_msgs::msg::Shape::BOUNDING_BOX;
+  obj.shape.dimensions.x = 4.0;
+  obj.shape.dimensions.y = 2.0;
+  obj.shape.dimensions.z = 1.5;
+  objs->objects.push_back(obj);
+
+  ObjectsToCostmap obj2costmap;
+
+  // UNKNOWN excluded → dominant is UNKNOWN → object should be skipped
+  const auto costmap_exclude_unknown = obj2costmap.makeCostmapFromObjects(
+    make_gridmap(), 0.0, 1, ObjectsToCostmap::ObjectCostMode::Fixed, 1.0, {LABEL::UNKNOWN}, objs);
+  EXPECT_EQ(count_nonzero(costmap_exclude_unknown), 0)
+    << "Dominant label is UNKNOWN; object must be skipped when UNKNOWN is excluded";
+
+  // PEDESTRIAN excluded → dominant is UNKNOWN (not excluded) → object should produce cost
+  const auto costmap_exclude_ped = obj2costmap.makeCostmapFromObjects(
+    make_gridmap(), 0.0, 1, ObjectsToCostmap::ObjectCostMode::Fixed, 1.0, {LABEL::PEDESTRIAN},
+    objs);
+  EXPECT_GT(count_nonzero(costmap_exclude_ped), 0)
+    << "Dominant label is UNKNOWN; object must be included when only PEDESTRIAN is excluded";
+}
+
+// Object with empty classification vector → treated as UNKNOWN.
+TEST_F(ObjectLabelFilterTest, EmptyClassificationTreatedAsUnknown)
+{
+  auto objs = std::make_shared<autoware_perception_msgs::msg::PredictedObjects>();
+  objs->header.frame_id = "map";
+
+  autoware_perception_msgs::msg::PredictedObject obj;
+  // no classification entries
+  obj.kinematics.initial_pose_with_covariance.pose.orientation.w = 1.0;
+  obj.shape.type = autoware_perception_msgs::msg::Shape::BOUNDING_BOX;
+  obj.shape.dimensions.x = 4.0;
+  obj.shape.dimensions.y = 2.0;
+  obj.shape.dimensions.z = 1.5;
+  objs->objects.push_back(obj);
+
+  ObjectsToCostmap obj2costmap;
+
+  // UNKNOWN excluded → object skipped
+  const auto costmap_exclude_unknown = obj2costmap.makeCostmapFromObjects(
+    make_gridmap(), 0.0, 1, ObjectsToCostmap::ObjectCostMode::Fixed, 1.0, {LABEL::UNKNOWN}, objs);
+  EXPECT_EQ(count_nonzero(costmap_exclude_unknown), 0)
+    << "Empty-classification object is treated as UNKNOWN; must be skipped when UNKNOWN is "
+       "excluded";
+
+  // CAR excluded → UNKNOWN not excluded → object included
+  const auto costmap_exclude_car = obj2costmap.makeCostmapFromObjects(
+    make_gridmap(), 0.0, 1, ObjectsToCostmap::ObjectCostMode::Fixed, 1.0, {LABEL::CAR}, objs);
+  EXPECT_GT(count_nonzero(costmap_exclude_car), 0)
+    << "Empty-classification object is treated as UNKNOWN; must be included when UNKNOWN is not "
+       "excluded";
+}
+
 }  // namespace autoware::costmap_generator

@@ -53,9 +53,11 @@
 #include <tf2_geometry_msgs/tf2_geometry_msgs.hpp>
 #endif
 
+#include <autoware_perception_msgs/msg/object_classification.hpp>
 #include <autoware_perception_msgs/msg/predicted_objects.hpp>
 
 #include <string>
+#include <unordered_set>
 
 namespace autoware::costmap_generator
 {
@@ -74,18 +76,26 @@ public:
 
   ObjectsToCostmap();
 
+  /// \brief convert a label name string to its uint8 constant
+  /// \param[in] label_str: label name (e.g. "car", "unknown")
+  /// \param[out] corresponding ObjectClassification label value; UNKNOWN on unknown strings
+  static uint8_t labelFromString(const std::string & label_str);
+
   /// \brief calculate cost from PredictedObjects
   /// \param[in] costmap: initialized gridmap
   /// \param[in] expand_polygon_size: expand object's costmap polygon
   /// \param[in] size_of_expansion_kernel: kernel size for blurring cost
   /// \param[in] object_cost_mode: object cost source mode
   /// \param[in] fixed_objects_cost: fixed object cost used when mode is "fixed"
+  /// \param[in] excluded_labels: set of ObjectClassification label values to reject;
+  ///            objects whose dominant label is in this set are skipped.
+  ///            An empty set means no objects are excluded.
   /// \param[in] in_objects: subscribed PredictedObjects
   /// \param[out] calculated cost in grid_map::Matrix format
   grid_map::Matrix makeCostmapFromObjects(
     const grid_map::GridMap & costmap, const double expand_polygon_size,
     const int64_t size_of_expansion_kernel, const ObjectCostMode object_cost_mode,
-    const double fixed_objects_cost,
+    const double fixed_objects_cost, const std::unordered_set<uint8_t> & excluded_labels,
     const autoware_perception_msgs::msg::PredictedObjects::ConstSharedPtr in_objects);
 
 private:
@@ -110,7 +120,6 @@ private:
     const std_msgs::msg::Header & header,
     const autoware_perception_msgs::msg::PredictedObject & in_object,
     const double expand_rectangle_size);
-
 
   /// \brief make polygon(grid_map::Polygon) from convex hull points
   /// \param[in] in_centroid: object's centroid

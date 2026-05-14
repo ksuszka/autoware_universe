@@ -32,29 +32,53 @@ None
 
 ### Parameters
 
-| Name                         | Type   | Description                                                                                    |
-| ---------------------------- | ------ | ---------------------------------------------------------------------------------------------- |
-| `update_rate`                | double | timer's update rate                                                                            |
-| `activate_by_scenario`       | bool   | if true, activate by scenario = parking. Otherwise, activate if vehicle is inside parking lot. |
-| `use_objects`                | bool   | whether using `~input/objects` or not                                                          |
-| `use_points`                 | bool   | whether using `~input/points_no_ground` or not                                                 |
-| `use_wayarea`                | bool   | whether using `wayarea` from `~input/vector_map` or not                                        |
-| `use_parkinglot`             | bool   | whether using `parkinglot` from `~input/vector_map` or not                                     |
-| `use_lanelet_obstacles`      | bool   | whether marking `obstacle`-type polygons from `~input/vector_map` with maximum cost or not     |
-| `costmap_frame`              | string | created costmap's coordinate                                                                   |
-| `vehicle_frame`              | string | vehicle's coordinate                                                                           |
-| `map_frame`                  | string | map's coordinate                                                                               |
-| `grid_min_value`             | double | minimum cost for gridmap                                                                       |
-| `grid_max_value`             | double | maximum cost for gridmap                                                                       |
-| `grid_resolution`            | double | resolution for gridmap                                                                         |
-| `grid_length_x`              | int    | size of gridmap for x direction                                                                |
-| `grid_length_y`              | int    | size of gridmap for y direction                                                                |
-| `grid_position_x`            | int    | offset from coordinate in x direction                                                          |
-| `grid_position_y`            | int    | offset from coordinate in y direction                                                          |
-| `maximum_lidar_height_thres` | double | maximum height threshold for pointcloud data (relative to the vehicle_frame)                   |
-| `minimum_lidar_height_thres` | double | minimum height threshold for pointcloud data (relative to the vehicle_frame)                   |
-| `expand_rectangle_size`      | double | expand object's rectangle with this value                                                      |
-| `size_of_expansion_kernel`   | int    | kernel size for blurring effect on object's costmap                                            |
+| Name                         | Type     | Description                                                                                    |
+| ---------------------------- | ------   | ---------------------------------------------------------------------------------------------- |
+| `update_rate`                | double   | timer's update rate                                                                            |
+| `activate_by_scenario`       | bool     | if true, activate by scenario = parking. Otherwise, activate if vehicle is inside parking lot. |
+| `use_objects`                | bool     | whether using `~input/objects` or not                                                          |
+| `use_points`                 | bool     | whether using `~input/points_no_ground` or not                                                 |
+| `use_wayarea`                | bool     | whether using `wayarea` from `~input/vector_map` or not                                        |
+| `use_parkinglot`             | bool     | whether using `parkinglot` from `~input/vector_map` or not                                     |
+| `use_lanelet_obstacles`      | bool     | whether marking `obstacle`-type polygons from `~input/vector_map` with maximum cost or not     |
+| `costmap_frame`              | string   | created costmap's coordinate                                                                   |
+| `vehicle_frame`              | string   | vehicle's coordinate                                                                           |
+| `map_frame`                  | string   | map's coordinate                                                                               |
+| `grid_min_value`             | double   | minimum cost for gridmap                                                                       |
+| `grid_max_value`             | double   | maximum cost for gridmap                                                                       |
+| `grid_resolution`            | double   | resolution for gridmap                                                                         |
+| `grid_length_x`              | int      | size of gridmap for x direction                                                                |
+| `grid_length_y`              | int      | size of gridmap for y direction                                                                |
+| `grid_position_x`            | int      | offset from coordinate in x direction                                                          |
+| `grid_position_y`            | int      | offset from coordinate in y direction                                                          |
+| `maximum_lidar_height_thres` | double   | maximum height threshold for pointcloud data (relative to the vehicle_frame)                   |
+| `minimum_lidar_height_thres` | double   | minimum height threshold for pointcloud data (relative to the vehicle_frame)                   |
+| `expand_rectangle_size`      | double   | expand object's rectangle with this value                                                      |
+| `size_of_expansion_kernel`   | int      | kernel size for blurring effect on object's costmap                                            |
+| `objects_cost_mode`          | string   | cost source for object costmap cells                                                           |
+| `fixed_objects_cost`         | double   | fixed cost value used when `objects_cost_mode` is `"fixed"`                                    |
+| `excluded_object_labels`     | string[] | list of object classification labels to exclude from the costmap                               |
+
+### Object Label Filtering
+
+The `excluded_object_labels` parameter controls which `PredictedObject` classification types are **excluded** from the costmap built by `makeCostmapFromObjects`. For each object the dominant label (highest classification probability) is determined; if it appears in the exclusion list the object is skipped entirely.
+
+**Supported label values:**
+
+`unknown`, `car`, `truck`, `bus`, `trailer`, `motorcycle`, `bicycle`, `pedestrian`
+
+**Default configuration** (in `costmap_generator.param.yaml`):
+
+```yaml
+excluded_object_labels:
+  - "unknown"
+```
+
+This filters out `UNKNOWN` objects whose bounding areas tend to be larger than the actual obstacle. To compensate for the removed detections the node can additionally consume a `PointCloud` input (e.g. from clustering) which provides obstacle coverage without the over-sized shapes.
+
+An empty list disables filtering — all objects pass through (backward-compatible behaviour).
+
+Unrecognised label strings are mapped to `UNKNOWN` and a warning is logged once at node start-up.
 
 ### Flowchart
 

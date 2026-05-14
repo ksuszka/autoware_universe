@@ -131,6 +131,24 @@
           "type": "number",
           "default": 1.0,
           "description": "Fixed object cost used when objects_cost_mode is fixed."
+        },
+        "excluded_object_labels": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "unknown",
+              "car",
+              "truck",
+              "bus",
+              "trailer",
+              "motorcycle",
+              "bicycle",
+              "pedestrian"
+            ]
+          },
+          "default": [],
+          "description": "List of object classification labels to exclude from the costmap. Objects whose dominant label (highest probability) is on this list are skipped. An empty list means no filtering."
         }
       },
       "required": [

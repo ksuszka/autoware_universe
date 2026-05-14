@@ -7,7 +7,7 @@
       <composable_node pkg="autoware_costmap_generator" plugin="autoware::costmap_generator::CostmapGenerator" name="costmap_generator" namespace="">
         <!-- topic remap -->
         <remap from="~/input/objects" to="/perception/object_recognition/objects"/>
-        <remap from="~/input/points_no_ground" to="/perception/obstacle_segmentation/pointcloud"/>
+        <remap from="~/input/points_no_ground" to="/perception/object_recognition/detection/clustering/output/pointcloud"/>
         <remap from="~/input/vector_map" to="/map/vector_map"/>
         <remap from="~/input/scenario" to="/planning/scenario_planning/scenario"/>
         <remap from="~/output/grid_map" to="costmap_generator/grid_map"/>

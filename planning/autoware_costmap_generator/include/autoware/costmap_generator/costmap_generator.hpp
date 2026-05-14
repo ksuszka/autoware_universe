@@ -73,6 +73,7 @@
 
 #include <memory>
 #include <optional>
+#include <unordered_set>
 #include <vector>
 
 class TestCostmapGenerator;
@@ -122,6 +123,7 @@ private:
 
   PointsToCostmap points2costmap_{};
   ObjectsToCostmap objects2costmap_;
+  std::unordered_set<uint8_t> excluded_labels_;
 
   std::unique_ptr<CostmapDiffOverlay> costmap_diff_overlay_;
 
@@ -210,6 +212,9 @@ private:
 
   /// \brief calculate cost for final output
   grid_map::Matrix generateCombinedCostmap();
+
+  /// \brief rebuild excluded_labels_ from the current parameter values
+  void loadExcludedLabels();
 
   /// \brief measure processing time
   autoware_utils::StopWatch<std::chrono::milliseconds> stop_watch;

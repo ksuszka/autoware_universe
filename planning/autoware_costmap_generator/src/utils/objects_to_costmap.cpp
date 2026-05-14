@@ -43,9 +43,10 @@
  ********************/
 
 #include "autoware/costmap_generator/utils/objects_to_costmap.hpp"
+
+#include <autoware/grid_map_utils/polygon_iterator.hpp>
 #include <autoware/universe_utils/geometry/boost_polygon_utils.hpp>
 #include <autoware/universe_utils/geometry/geometry.hpp>
-#include <autoware/grid_map_utils/polygon_iterator.hpp>
 #include <grid_map_core/TypeDefs.hpp>
 #include <rclcpp/logger.hpp>
 #include <rclcpp/logging.hpp>
@@ -56,9 +57,13 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <unordered_map>
 
 namespace autoware::costmap_generator
 {
+
+using ObjectClassification = autoware_perception_msgs::msg::ObjectClassification;
+
 // Constructor
 ObjectsToCostmap::ObjectsToCostmap()
 : NUMBER_OF_POINTS(4),
@@ -66,6 +71,18 @@ ObjectsToCostmap::ObjectsToCostmap()
   OBJECTS_COSTMAP_LAYER_("objects_costmap"),
   BLURRED_OBJECTS_COSTMAP_LAYER_("blurred_objects_costmap")
 {
+}
+
+uint8_t ObjectsToCostmap::labelFromString(const std::string & label_str)
+{
+  static const std::unordered_map<std::string, uint8_t> kLabelMap = {
+    {"unknown", ObjectClassification::UNKNOWN}, {"car", ObjectClassification::CAR},
+    {"truck", ObjectClassification::TRUCK},     {"bus", ObjectClassification::BUS},
+    {"trailer", ObjectClassification::TRAILER}, {"motorcycle", ObjectClassification::MOTORCYCLE},
+    {"bicycle", ObjectClassification::BICYCLE}, {"pedestrian", ObjectClassification::PEDESTRIAN},
+  };
+  const auto it = kLabelMap.find(label_str);
+  return (it != kLabelMap.end()) ? it->second : ObjectClassification::UNKNOWN;
 }
 
 Eigen::MatrixXd ObjectsToCostmap::makeRectanglePoints(
@@ -109,7 +126,6 @@ grid_map::Polygon ObjectsToCostmap::makePolygonFromObjectBox(
   return polygon;
 }
 
-
 grid_map::Polygon ObjectsToCostmap::makePolygonFromObjectConvexHull(
   const std_msgs::msg::Header & header,
   const autoware_perception_msgs::msg::PredictedObject & in_object,
@@ -120,7 +136,6 @@ grid_map::Polygon ObjectsToCostmap::makePolygonFromObjectConvexHull(
 
   auto poly2d = autoware::universe_utils::toPolygon2d(
     in_object.kinematics.initial_pose_with_covariance.pose, in_object.shape);
-
 
   if (expand_polygon_size >= 0.0) {
     poly2d = autoware::universe_utils::expandPolygonUniform(poly2d, expand_polygon_size);
@@ -175,13 +190,24 @@ void naive_mean_filter_on_grid_edges(
 grid_map::Matrix ObjectsToCostmap::makeCostmapFromObjects(
   const grid_map::GridMap & costmap, const double expand_polygon_size,
   const int64_t size_of_expansion_kernel, const ObjectCostMode object_cost_mode,
-  const double fixed_objects_cost,
+  const double fixed_objects_cost, const std::unordered_set<uint8_t> & excluded_labels,
   const autoware_perception_msgs::msg::PredictedObjects::ConstSharedPtr in_objects)
 {
   grid_map::GridMap objects_costmap = costmap;
   objects_costmap.add(OBJECTS_COSTMAP_LAYER_, 0);
 
   for (const auto & object : in_objects->objects) {
+    uint8_t dominant_label = ObjectClassification::UNKNOWN;
+    if (!object.classification.empty()) {
+      const auto & best = *std::max_element(
+        object.classification.begin(), object.classification.end(),
+        [](const auto & a, const auto & b) { return a.probability < b.probability; });
+      dominant_label = best.label;
+    }
+    if (excluded_labels.count(dominant_label) > 0) {
+      continue;
+    }
+
     grid_map::Polygon polygon;
     if (object.shape.type == autoware_perception_msgs::msg::Shape::POLYGON) {
       polygon = makePolygonFromObjectConvexHull(in_objects->header, object, expand_polygon_size);

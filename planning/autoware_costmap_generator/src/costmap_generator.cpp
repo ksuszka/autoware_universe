@@ -62,6 +62,7 @@
 
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace
@@ -206,6 +207,26 @@ CostmapGenerator::CostmapGenerator(const rclcpp::NodeOptions & node_options)
 
   // Initialize
   initGridmap();
+  loadExcludedLabels();
+}
+
+void CostmapGenerator::loadExcludedLabels()
+{
+  excluded_labels_.clear();
+  for (const auto & label_str : param_->excluded_object_labels) {
+    const auto label = ObjectsToCostmap::labelFromString(label_str);
+    if (
+      label == autoware_perception_msgs::msg::ObjectClassification::UNKNOWN &&
+      label_str != "unknown") {
+      RCLCPP_WARN(
+        get_logger(),
+        "Unrecognized object label '%s' in excluded_object_labels parameter; "
+        "it maps to UNKNOWN. Valid values: unknown, car, truck, bus, trailer, motorcycle, "
+        "bicycle, pedestrian.",
+        label_str.c_str());
+    }
+    excluded_labels_.insert(label);
+  }
 }
 
 void CostmapGenerator::loadRoadAreasFromLaneletMap(
@@ -478,9 +499,10 @@ std::optional<grid_map::Matrix> CostmapGenerator::generateObjectsCostmap(
 
   const auto object_cost_mode =
     parseObjectCostMode(param_->objects_cost_mode, rclcpp::get_logger("costmap_generator"));
+
   grid_map::Matrix objects_costmap = objects2costmap_.makeCostmapFromObjects(
     costmap_, param_->expand_polygon_size, param_->size_of_expansion_kernel, object_cost_mode,
-    param_->fixed_objects_cost, transformed_objects);
+    param_->fixed_objects_cost, excluded_labels_, transformed_objects);
 
   return objects_costmap;
 }

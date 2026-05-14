@@ -47,7 +47,8 @@ VoxelGridBasedEuclideanClusterNode::VoxelGridBasedEuclideanClusterNode(
 
   cluster_pub_ = this->create_publisher<tier4_perception_msgs::msg::DetectedObjectsWithFeature>(
     "output", rclcpp::QoS{1});
-  debug_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>("debug/clusters", 1);
+  pointcloud_pub_ = this->create_publisher<sensor_msgs::msg::PointCloud2>(
+    "output/pointcloud", rclcpp::SensorDataQoS().keep_last(1));
   stop_watch_ptr_ = std::make_unique<autoware_utils::StopWatch<std::chrono::milliseconds>>();
   debug_publisher_ =
     std::make_unique<autoware_utils::DebugPublisher>(this, "voxel_grid_based_euclidean_cluster");
@@ -72,12 +73,11 @@ void VoxelGridBasedEuclideanClusterNode::onPointCloud(
   cluster_->cluster(input_msg, output);
   cluster_pub_->publish(output);
 
-  // build debug msg
-  if (debug_pub_->get_subscription_count() >= 1) {
-    sensor_msgs::msg::PointCloud2 debug;
-    convertObjectMsg2SensorMsg(output, debug);
-    debug_pub_->publish(debug);
-  }
+  // publish merged pointcloud of all clusters
+  sensor_msgs::msg::PointCloud2 pointcloud;
+  convertObjectMsg2SensorMsg(output, pointcloud);
+  pointcloud_pub_->publish(pointcloud);
+
   if (debug_publisher_) {
     const double processing_time_ms = stop_watch_ptr_->toc("processing_time", true);
     const double cyclic_time_ms = stop_watch_ptr_->toc("cyclic_time", true);
