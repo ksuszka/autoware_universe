@@ -45,6 +45,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <deque>
 #include <memory>
 #include <stdexcept>
@@ -61,6 +62,8 @@ constexpr double COLLISION_MARKER_LIFETIME_SEC = 10.0;
 constexpr double COLLISION_TEXT_HEIGHT_OFFSET = 1.0;  // meters above pose
 constexpr double COLLISION_TEXT_SCALE = 0.3;          // meters
 constexpr double COLLISION_FOOTPRINT_WIDTH = 0.05;    // line width in meters
+constexpr double CRITICAL_OBSTACLE_MARKER_SCALE = 0.5;
+constexpr double CRITICAL_OBSTACLE_TEXT_SCALE = 0.35;
 constexpr size_t OBSTACLE_WALL_MARGIN_INDEX = 2;
 
 /// @brief Create standard marker header (pure function)
@@ -229,6 +232,7 @@ PlannerCommonParam FreespacePlannerNode::getPlannerCommonParam()
 bool FreespacePlannerNode::isPlanRequired()
 {
   if (trajectory_.points.empty()) {
+    clearCriticalPlannerObstacleMarker();
     return true;
   }
 
@@ -236,11 +240,14 @@ bool FreespacePlannerNode::isPlanRequired()
     RCLCPP_INFO(get_logger(), "New obstacle found on trajectory. Initiating replanning.");
     const auto wall_pose = calc_obstacle_wall_pose_on_partial_trajectory(
       partial_trajectory_, current_pose_.pose, *obstacle_pose_);
-    wall_manager_->onObstacle(wall_pose ? *wall_pose : *obstacle_pose_);
+    const auto critical_pose = wall_pose ? *wall_pose : *obstacle_pose_;
+    wall_manager_->onObstacle(critical_pose);
+    publishCriticalPlannerObstacleMarker(critical_pose, "REPLAN", false);
     return true;
   }
 
   wall_manager_->onObstacleCleared();
+  clearCriticalPlannerObstacleMarker();
 
   if (node_param_.replan_when_course_out) {
     const bool is_course_out = utils::calc_distance_2d(trajectory_, current_pose_.pose) >
@@ -277,7 +284,7 @@ bool FreespacePlannerNode::checkCurrentTrajectoryCollision()
 
   if (!obs_found_time_) obs_found_time_ = get_clock()->now();
 
-  return (get_clock()->now() - obs_found_time_.get()).seconds() > node_param_.th_obstacle_time_sec;
+  return (get_clock()->now() - *obs_found_time_).seconds() > node_param_.th_obstacle_time_sec;
 }
 
 void FreespacePlannerNode::updateTargetIndex()
@@ -677,8 +684,10 @@ void FreespacePlannerNode::planTrajectory()
     RCLCPP_DEBUG(get_logger(), "Found goal!");
     diag_status_.onPlanResult(true);
     wall_manager_->onPlanSuccess();
+    clearCriticalPlannerObstacleMarker();
     trajectory_ = utils::create_trajectory(
       current_pose_, algo_->getWaypoints(), node_param_.waypoints_velocity);
+
     reversing_indices_ = utils::get_reversing_indices(trajectory_);
     prev_target_index_ = 0;
     target_index_ = utils::get_next_target_index(
@@ -702,6 +711,7 @@ void FreespacePlannerNode::reset()
   parking_state_pub_->publish(is_completed_msg);
   obs_found_time_ = {};
   obstacle_pose_ = {};
+  clearCriticalPlannerObstacleMarker();
 }
 
 void FreespacePlannerNode::publishCollisionFootprintMarker(
@@ -764,6 +774,66 @@ void FreespacePlannerNode::publishCollisionFootprintMarker(
   debug_marker_pub_->publish(marker_array);
 }
 
+void FreespacePlannerNode::publishCriticalPlannerObstacleMarker(
+  const geometry_msgs::msg::Pose & pose_global, const std::string & short_label,
+  const bool is_failure)
+{
+  if (!debug_marker_pub_ || !occupancy_grid_) {
+    return;
+  }
+
+  visualization_msgs::msg::MarkerArray marker_array;
+  const auto header = create_marker_header(occupancy_grid_->header.frame_id, get_clock()->now());
+
+  auto critical_marker = create_base_marker(
+    header, "critical_planner_obstacle", 0, visualization_msgs::msg::Marker::SPHERE);
+  critical_marker.pose = pose_global;
+  critical_marker.scale.x = CRITICAL_OBSTACLE_MARKER_SCALE;
+  critical_marker.scale.y = CRITICAL_OBSTACLE_MARKER_SCALE;
+  critical_marker.scale.z = CRITICAL_OBSTACLE_MARKER_SCALE;
+  critical_marker.color.r = 1.0f;
+  critical_marker.color.g = is_failure ? 0.0f : 0.7f;
+  critical_marker.color.b = 0.0f;
+  critical_marker.color.a = 0.95f;
+
+  auto text_marker = create_base_marker(
+    header, "critical_planner_obstacle", 1, visualization_msgs::msg::Marker::TEXT_VIEW_FACING);
+  text_marker.pose = pose_global;
+  text_marker.pose.position.z += COLLISION_TEXT_HEIGHT_OFFSET;
+  text_marker.scale.z = CRITICAL_OBSTACLE_TEXT_SCALE;
+  text_marker.color.r = 1.0f;
+  text_marker.color.g = 1.0f;
+  text_marker.color.b = 1.0f;
+  text_marker.color.a = 1.0f;
+  text_marker.text = short_label;
+
+  marker_array.markers.push_back(critical_marker);
+  marker_array.markers.push_back(text_marker);
+  debug_marker_pub_->publish(marker_array);
+}
+
+void FreespacePlannerNode::clearCriticalPlannerObstacleMarker()
+{
+  if (!debug_marker_pub_ || !occupancy_grid_) {
+    return;
+  }
+
+  visualization_msgs::msg::MarkerArray marker_array;
+  const auto header = create_marker_header(occupancy_grid_->header.frame_id, get_clock()->now());
+
+  auto clear_sphere = create_base_marker(
+    header, "critical_planner_obstacle", 0, visualization_msgs::msg::Marker::SPHERE);
+  clear_sphere.action = visualization_msgs::msg::Marker::DELETE;
+
+  auto clear_text = create_base_marker(
+    header, "critical_planner_obstacle", 1, visualization_msgs::msg::Marker::TEXT_VIEW_FACING);
+  clear_text.action = visualization_msgs::msg::Marker::DELETE;
+
+  marker_array.markers.push_back(clear_sphere);
+  marker_array.markers.push_back(clear_text);
+  debug_marker_pub_->publish(marker_array);
+}
+
 TransformStamped FreespacePlannerNode::getTransform(
   const std::string & from, const std::string & to)
 {
@@ -805,6 +875,8 @@ void FreespacePlannerNode::initializePlanningAlgorithm()
       publishCollisionFootprintMarker(pose_local, label);
       const auto global_pose =
         autoware::freespace_planning_algorithms::local2global(*occupancy_grid_, pose_local);
+      publishCriticalPlannerObstacleMarker(
+        global_pose, (label == "start") ? "START" : "GOAL", true);
       wall_manager_->setCollisionContext(global_pose, label);
     });
     algo_ = std::move(astar_algo);

@@ -19,6 +19,10 @@
 
 namespace autoware::freespace_planner
 {
+namespace
+{
+constexpr double MIN_WALL_VISIBLE_DURATION_SEC = 1.0;
+}  // namespace
 
 StopVirtualWallManager::StopVirtualWallManager(rclcpp::Node & node, double base_link2front)
 : node_(node),
@@ -34,12 +38,15 @@ void StopVirtualWallManager::startPlanning(const geometry_msgs::msg::Pose & pose
   if (!planning_failed_) {
     collision_label_.clear();
   }
+  clear_pending_ = false;
   publish(Reason::PlanningInProgress);
 }
 
 void StopVirtualWallManager::onPlanSuccess()
 {
   planning_failed_ = false;
+  clear_pending_ = false;
+  last_visible_publish_time_ = rclcpp::Time{0, 0, RCL_ROS_TIME};
   publish(Reason::None);
 }
 
@@ -76,12 +83,22 @@ void StopVirtualWallManager::onObstacleCleared()
 void StopVirtualWallManager::onInactive()
 {
   if (reason_ != Reason::None) {
+    clear_pending_ = false;
+    last_visible_publish_time_ = rclcpp::Time{0, 0, RCL_ROS_TIME};
     publish(Reason::None);
   }
 }
 
 void StopVirtualWallManager::republishIfActive()
 {
+  if (clear_pending_) {
+    const auto now = node_.get_clock()->now();
+    if ((now - last_visible_publish_time_).seconds() >= MIN_WALL_VISIBLE_DURATION_SEC) {
+      publish(Reason::None);
+    }
+    return;
+  }
+
   if (reason_ != Reason::None && (vehicle_pose_ || collision_pose_)) {
     publish(reason_);
   }
@@ -96,30 +113,20 @@ void StopVirtualWallManager::publish(Reason reason)
     markers.markers.insert(markers.markers.end(), input.markers.begin(), input.markers.end());
   };
 
-  const auto make_reason_detail_text = [this]() {
-    if (collision_label_ == "start") {
-      return std::string("start pose collision");
-    }
-    if (collision_label_ == "goal") {
-      return std::string("goal pose collision");
-    }
-    return std::string("no valid path to goal");
-  };
-
-  const auto make_failure_reason_text = [&make_reason_detail_text]() {
-    return std::string("failed to find path: ") + make_reason_detail_text();
-  };
-
-  const auto make_replanning_reason_text = [&make_reason_detail_text]() {
-    return std::string("replanning, ") + make_reason_detail_text();
-  };
-
   if (reason == Reason::None) {
+    if (
+      reason_ != Reason::None &&
+      (now - last_visible_publish_time_).seconds() < MIN_WALL_VISIBLE_DURATION_SEC) {
+      clear_pending_ = true;
+      return;
+    }
+
     append_markers(autoware::motion_utils::createDeletedStopVirtualWallMarker(now, 0));
     append_markers(autoware::motion_utils::createDeletedStopVirtualWallMarker(now, 1));
     vehicle_pose_ = {};
     collision_pose_ = {};
     collision_label_.clear();
+    clear_pending_ = false;
   } else {
     if (!vehicle_pose_ && !collision_pose_) {
       reason_ = reason;
@@ -127,41 +134,35 @@ void StopVirtualWallManager::publish(Reason reason)
     }
 
     std::string primary_text;
+    const auto primary_pose = (reason == Reason::NoPathToGoal && collision_pose_)
+                                ? collision_pose_
+                                : (vehicle_pose_ ? vehicle_pose_ : collision_pose_);
+
     if (reason == Reason::ObstacleOnTrajectory) {
-      primary_text = "obstacle on trajectory";
-    } else if (planning_failed_) {
-      primary_text = make_replanning_reason_text();
+      primary_text = "REPLAN";
     } else if (reason == Reason::PlanningInProgress) {
-      primary_text = "planning in progress...";
+      primary_text = "PLANNING";
+    } else if (collision_label_ == "start") {
+      primary_text = "START BLOCKED";
+    } else if (collision_label_ == "goal") {
+      primary_text = "GOAL BLOCKED";
     } else {
-      primary_text = make_failure_reason_text();
+      primary_text = "BLOCKED";
     }
 
-    const auto & primary_pose = vehicle_pose_ ? vehicle_pose_ : collision_pose_;
     if (primary_pose) {
       append_markers(
         autoware::motion_utils::createStopVirtualWallMarker(
           *primary_pose, primary_text, now, 0, base_link2front_));
     }
 
-    if (reason == Reason::NoPathToGoal && collision_pose_) {
-      std::string collision_text;
-      if (collision_label_ == "start") {
-        collision_text = "collision location: start pose";
-      } else if (collision_label_ == "goal") {
-        collision_text = "collision location: goal pose";
-      } else {
-        collision_text = "collision location";
-      }
-      append_markers(
-        autoware::motion_utils::createStopVirtualWallMarker(
-          *collision_pose_, collision_text, now, 1, base_link2front_));
-    }
-
     // Override default 0.5 s lifetime so the wall survives the blocking makePlan() call
     for (auto & m : markers.markers) {
       m.lifetime = rclcpp::Duration::from_seconds(0.0);  // infinite until explicitly deleted
     }
+
+    clear_pending_ = false;
+    last_visible_publish_time_ = now;
   }
   publisher_->publish(markers);
   reason_ = reason;

@@ -42,6 +42,7 @@ generate_parameter_library(costmap_generator_node_parameters
 
 ament_auto_add_library(costmap_generator_node SHARED
   src/costmap_generator.cpp
+  src/costmap_diff_overlay.cpp
 )
 target_link_libraries(costmap_generator_node
   ${PCL_LIBRARIES}

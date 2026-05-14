@@ -45,10 +45,11 @@
 #ifndef AUTOWARE__COSTMAP_GENERATOR__COSTMAP_GENERATOR_HPP_
 #define AUTOWARE__COSTMAP_GENERATOR__COSTMAP_GENERATOR_HPP_
 
+#include "autoware/costmap_generator/costmap_diff_overlay.hpp"
 #include "autoware/costmap_generator/utils/objects_to_costmap.hpp"
 #include "autoware/costmap_generator/utils/points_to_costmap.hpp"
-#include <autoware_costmap_generator/costmap_generator_node_parameters.hpp>
 
+#include <autoware_costmap_generator/costmap_generator_node_parameters.hpp>
 #include <autoware_lanelet2_extension/utility/message_conversion.hpp>
 #include <autoware_utils/ros/polling_subscriber.hpp>
 #include <autoware_utils/ros/processing_time_publisher.hpp>
@@ -121,6 +122,8 @@ private:
 
   PointsToCostmap points2costmap_{};
   ObjectsToCostmap objects2costmap_;
+
+  std::unique_ptr<CostmapDiffOverlay> costmap_diff_overlay_;
 
   autoware_internal_planning_msgs::msg::Scenario::ConstSharedPtr scenario_;
 

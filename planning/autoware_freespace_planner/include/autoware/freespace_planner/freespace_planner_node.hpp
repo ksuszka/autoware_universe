@@ -226,8 +226,8 @@ private:
   bool is_completed_ = false;
   bool reset_in_progress_ = false;
   bool is_new_parking_cycle_ = true;
-  boost::optional<rclcpp::Time> obs_found_time_;
-  boost::optional<geometry_msgs::msg::Pose> obstacle_pose_;
+  std::optional<rclcpp::Time> obs_found_time_;
+  std::optional<geometry_msgs::msg::Pose> obstacle_pose_;
 
   LaneletRoute::ConstSharedPtr route_;
   OccupancyGrid::ConstSharedPtr occupancy_grid_;
@@ -306,6 +306,9 @@ private:
 
   void publishCollisionFootprintMarker(
     const geometry_msgs::msg::Pose & pose_local, const std::string & label);
+  void publishCriticalPlannerObstacleMarker(
+    const geometry_msgs::msg::Pose & pose_global, const std::string & short_label, bool is_failure);
+  void clearCriticalPlannerObstacleMarker();
 
   TransformStamped getTransform(const std::string & from, const std::string & to);
 

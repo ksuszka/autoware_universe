@@ -112,6 +112,11 @@
           "default": 9,
           "description": "The kernel size for blurring effect on object's costmap."
         },
+        "costmap_diff_window_sec": {
+          "type": "integer",
+          "default": 30,
+          "description": "Time window in seconds to keep changed cells highlighted in the costmap diff heatmap."
+        },
         "objects_cost_mode": {
           "type": "string",
           "default": "classification_probability",
@@ -150,6 +155,7 @@
         "use_points",
         "expand_polygon_size",
         "size_of_expansion_kernel",
+        "costmap_diff_window_sec",
         "objects_cost_mode",
         "fixed_objects_cost"
       ]

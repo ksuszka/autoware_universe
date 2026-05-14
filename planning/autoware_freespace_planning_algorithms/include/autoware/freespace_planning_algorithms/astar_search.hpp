@@ -24,15 +24,11 @@
 #include <std_msgs/msg/header.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 
-#include <boost/optional/optional.hpp>
-
 #include <cmath>
 #include <functional>
-#include <iostream>
+#include <optional>
 #include <queue>
 #include <string>
-#include <tuple>
-#include <unordered_map>
 #include <vector>
 
 namespace autoware::freespace_planning_algorithms
@@ -106,6 +102,14 @@ struct NodeComparison
 class AstarSearch : public AbstractPlanningAlgorithm
 {
 public:
+  enum class FailureReason : uint8_t {
+    None,
+    StartCollision,
+    GoalCollision,
+    TimeLimitExceeded,
+    OpenListExhausted,
+  };
+
   enum class CollisionStatus : uint8_t { Collision, NoCollision };
   using CollisionObserver = std::function<void(const Pose &, const std::string &, CollisionStatus)>;
 
@@ -206,7 +210,7 @@ private:
   // goal node, which may helpful in testing and debugging
   AstarNode * goal_node_;
 
-  mutable boost::optional<Pose> shifted_goal_pose_;
+  mutable std::optional<Pose> shifted_goal_pose_;
 
   // alternate goals for when multiple goal candidates are given
   std::vector<Pose> alternate_goals_;
@@ -231,6 +235,8 @@ private:
   bool is_backward_search_;
   bool is_multiple_goals_;
   bool is_reparking_ = false;
+  FailureReason last_failure_reason_{FailureReason::None};
+  std::optional<Pose> critical_failure_pose_local_;
 
   // the following constexpr values were found to be best by trial and error, through multiple
   // tests, and are not expected to be changed regularly, therefore they were not made into ros

@@ -64,6 +64,11 @@ costmap_generator_node:
   size_of_expansion_kernel:
     type: int
     description: Kernel size for blurring effect on object's costmap
+  costmap_diff_window_sec:
+    type: int
+    description: Time window in seconds to keep changed cells highlighted in the costmap diff heatmap
+    validation:
+      gt_eq<>: [0]
   objects_cost_mode:
     type: string
     description: Object cost source mode (classification_probability, existence_probability, fixed)

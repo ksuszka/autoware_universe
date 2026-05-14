@@ -23,3 +23,4 @@
     size_of_expansion_kernel: 9
     objects_cost_mode: "classification_probability"
     fixed_objects_cost: 1.0
+    costmap_diff_window_sec: 30

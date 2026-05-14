@@ -21,8 +21,7 @@
 #include <geometry_msgs/msg/pose.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
 
-#include <boost/optional.hpp>
-
+#include <optional>
 #include <string>
 
 namespace autoware::freespace_planner
@@ -68,10 +67,12 @@ private:
   double base_link2front_;
 
   Reason reason_{Reason::None};
-  boost::optional<geometry_msgs::msg::Pose> vehicle_pose_;
-  boost::optional<geometry_msgs::msg::Pose> collision_pose_;
+  std::optional<geometry_msgs::msg::Pose> vehicle_pose_;
+  std::optional<geometry_msgs::msg::Pose> collision_pose_;
   std::string collision_label_;
   bool planning_failed_{false};
+  bool clear_pending_{false};
+  rclcpp::Time last_visible_publish_time_{0, 0, RCL_ROS_TIME};
 
   void publish(Reason reason);
 };

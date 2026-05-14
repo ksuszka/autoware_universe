@@ -95,3 +95,31 @@ endif
 stop
 @enduml
 ```
+
+### Costmap Diff Heatmap Overlay
+
+The `CostmapDiffOverlay` component tracks cells that changed between consecutive `OccupancyGrid` frames and publishes a heatmap overlay to `~/overlayed_costmap`. This makes dynamic obstacles, sensor noise, and transient costmap changes visually apparent during parking maneuvers.
+
+#### How it works
+
+1. On every costmap cycle, `onCostmap()` compares the current costmap against the previous one.
+2. For each cell where $\Delta = |cost_{current} - cost_{previous}| > 0$, the cell is marked as changed and highlighted for `costmap_diff_window_sec` seconds.
+3. The heat intensity uses a logarithmic mapping:
+
+$$heat = \text{round}\left(heat_{min} + heat_{span} \cdot \frac{\ln(1 + \Delta)}{\ln(101)}\right)$$
+
+4. Cells that change repeatedly receive a frequency boost (+10) for higher visibility.
+5. Only free-space cells appear in the heatmap; occupied cells (cost > 0) are skipped.
+6. When the costmap origin shifts (vehicle motion), persistent highlight state is remapped to the new grid frame so highlights survive origin changes.
+
+#### Additional output topic
+
+| Name                  | Type                    | Description                                         |
+| --------------------- | ----------------------- | --------------------------------------------------- |
+| `~/overlayed_costmap` | nav_msgs::OccupancyGrid | heatmap of recently changed cells (transient local) |
+
+#### Additional parameter
+
+| Name                      | Type | Default | Description                                            |
+| ------------------------- | ---- | ------- | ------------------------------------------------------ |
+| `costmap_diff_window_sec` | int  | 30      | time window (seconds) a changed cell stays highlighted |

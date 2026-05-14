@@ -195,6 +195,9 @@ CostmapGenerator::CostmapGenerator(const rclcpp::NodeOptions & node_options)
   pub_processing_time_ms_ =
     this->create_publisher<autoware_internal_debug_msgs::msg::Float64Stamped>(
       "~/debug/processing_time_ms", 1);
+  // Costmap diff overlay
+  const auto costmap_diff_window = std::chrono::seconds{param_->costmap_diff_window_sec};
+  costmap_diff_overlay_ = std::make_unique<CostmapDiffOverlay>(*this, costmap_diff_window);
 
   // Timer
   const auto period_ns = rclcpp::Rate(param_->update_rate).period();
@@ -573,6 +576,11 @@ void CostmapGenerator::publishCostmap(
   out_occupancy_grid.header = header;
   out_occupancy_grid.info.origin.position.z = tf.transform.translation.z;
   pub_occupancy_grid_->publish(out_occupancy_grid);
+  // Publish diff overlay heatmap
+  if (costmap_diff_overlay_) {
+    costmap_diff_overlay_->onCostmap(
+      std::make_shared<nav_msgs::msg::OccupancyGrid>(out_occupancy_grid));
+  }
 
   // Publish GridMap
   auto out_gridmap_msg = grid_map::GridMapRosConverter::toMessage(costmap);
