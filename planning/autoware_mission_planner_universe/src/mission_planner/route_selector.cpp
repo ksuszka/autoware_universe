@@ -64,6 +64,10 @@ std::optional<LaneletRoute> RouteInterface::get_route() const
 void RouteInterface::change_route()
 {
   route_ = std::nullopt;
+
+  LaneletRoute empty_route;
+  empty_route.header.stamp = clock_->now();
+  pub_route_->publish(empty_route);
 }
 
 void RouteInterface::change_state(RouteState::_state_type state)

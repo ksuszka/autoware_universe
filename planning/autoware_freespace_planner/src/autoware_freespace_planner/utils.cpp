@@ -17,6 +17,7 @@
 #include <autoware/motion_utils/trajectory/trajectory.hpp>
 #include <autoware_utils/geometry/geometry.hpp>
 #include <autoware_utils/geometry/pose_deviation.hpp>
+#include <tf2/utils.hpp>
 
 #include <deque>
 #include <vector>
@@ -143,17 +144,28 @@ Trajectory create_trajectory(
 Trajectory create_stop_trajectory(
   const PoseStamped & current_pose, const rclcpp::Clock::SharedPtr clock)
 {
-  PlannerWaypoints waypoints;
-  PlannerWaypoint waypoint;
+  // Create a stop trajectory with at least 3 points for velocity_smoother compatibility.
+  // Velocity smoother requires minimum 3 points to apply filtering (lateral acc, steering rate).
+  // Generate points with small offset along the trajectory direction.
+  Trajectory trajectory;
+  trajectory.header.stamp = clock->now();
+  trajectory.header.frame_id = current_pose.header.frame_id;
 
-  waypoints.header.stamp = clock->now();
-  waypoints.header.frame_id = current_pose.header.frame_id;
-  waypoint.pose.header = waypoints.header;
-  waypoint.pose.pose = current_pose.pose;
-  waypoint.is_back = false;
-  waypoints.waypoints.push_back(waypoint);
+  const auto yaw = tf2::getYaw(current_pose.pose.orientation);
 
-  return create_trajectory(current_pose, waypoints, 0.0);
+  // Generate 3 points along the forward direction with small spacing
+  constexpr double point_interval = 0.1;  // 0.1 m spacing between points
+  for (size_t i = 0; i < 3; ++i) {
+    TrajectoryPoint point;
+    point.pose = current_pose.pose;
+    point.pose.position.x += i * point_interval * std::cos(yaw);
+    point.pose.position.y += i * point_interval * std::sin(yaw);
+    point.longitudinal_velocity_mps = 0.0;
+    point.acceleration_mps2 = 0.0;
+    trajectory.points.push_back(point);
+  }
+
+  return trajectory;
 }
 
 Trajectory create_stop_trajectory(const Trajectory & trajectory)

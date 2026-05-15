@@ -36,13 +36,13 @@ public:
 
   StopVirtualWallManager(rclcpp::Node & node, double base_link2front);
 
-  /// Called in planTrajectory() before makePlan() — shows "Preparing the path…" wall.
+  /// Called before makePlan() starts — shows "Preparing the path…" wall.
   void startPlanning(const geometry_msgs::msg::Pose & pose);
 
-  /// Called in planTrajectory() on success — clears the wall.
+  /// Called when planning succeeds — clears the wall.
   void onPlanSuccess();
 
-  /// Called in planTrajectory() on failure — shows "failed to find path" wall.
+  /// Called when planning fails — shows "failed to find path" wall.
   void onPlanFailed();
 
   /// Called by AstarSearch collision observer during makePlan() — caches the precise

@@ -33,14 +33,15 @@
 
 #include "autoware/freespace_planner/planning_stats.hpp"
 #include "autoware/freespace_planner/stop_virtual_wall_manager.hpp"
-#include "autoware_utils/ros/logger_level_configure.hpp"
 
 #include <autoware/freespace_planning_algorithms/astar_search.hpp>
 #include <autoware/freespace_planning_algorithms/rrtstar.hpp>
+#include <autoware_utils/ros/logger_level_configure.hpp>
 #include <autoware_utils/ros/polling_subscriber.hpp>
 #include <autoware_vehicle_info_utils/vehicle_info_utils.hpp>
 #include <diagnostic_updater/diagnostic_updater.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <rosidl_runtime_cpp/message_initialization.hpp>
 
 #include <autoware_internal_debug_msgs/msg/float64_stamped.hpp>
 #include <autoware_internal_planning_msgs/msg/scenario.hpp>
@@ -51,6 +52,8 @@
 #include <nav_msgs/msg/odometry.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <visualization_msgs/msg/marker_array.hpp>
+
+#include <boost/thread/synchronized_value.hpp>
 
 #ifdef ROS_DISTRO_GALACTIC
 #include <tf2_geometry_msgs/tf2_geometry_msgs.h>
@@ -63,9 +66,13 @@
 #include <tf2_ros/buffer.h>
 #include <tf2_ros/transform_listener.h>
 
+#include <atomic>
 #include <deque>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 class TestFreespacePlanner;
@@ -209,6 +216,9 @@ private:
 
   // params
   NodeParam node_param_;
+  PlannerCommonParam planner_common_param_;
+  AstarParam astar_param_{};
+  RRTStarParam rrtstar_param_{};
   VehicleShape vehicle_shape_;
   VehicleShape collision_vehicle_shape_;
 
@@ -226,10 +236,54 @@ private:
   bool is_completed_ = false;
   bool reset_in_progress_ = false;
   bool is_new_parking_cycle_ = true;
+  bool is_reparking_ = false;
   std::optional<rclcpp::Time> obs_found_time_;
   std::optional<geometry_msgs::msg::Pose> obstacle_pose_;
 
+  struct PlanningRequest
+  {
+    std::optional<OccupancyGrid> occupancy_grid;
+    PoseStamped current_pose;
+    PoseStamped goal_pose;
+    bool is_reparking{false};
+    uint64_t generation{0};
+  };
+
+  struct PlanningResult
+  {
+    PlanningResult() : trajectory(rosidl_runtime_cpp::MessageInitialization::ALL) {}
+
+    Trajectory trajectory;
+    bool success{false};
+    PlanningStatsCollector::MillisecondsF duration_ms{};
+    std::string error_msg;
+    uint64_t generation{0};
+  };
+
+  struct CollisionEvent
+  {
+    geometry_msgs::msg::Pose pose_local;
+    std::string label;
+    uint64_t generation{0};
+  };
+
+  using PlanningAlgorithmFactory = std::function<std::unique_ptr<AbstractPlanningAlgorithm>()>;
+  PlanningAlgorithmFactory planning_algorithm_factory_;
+
+  // Async planning state
+  // The planning algorithm runs in a worker thread so that onTimer() keeps
+  // firing (and publishing) while A* searches for a path.
+  std::thread planning_thread_;
+  std::atomic<bool> is_planning_{false};
+  std::atomic<bool> planning_result_ready_{false};
+  // Monotonically increasing generation counter.  Incremented on route or
+  // scenario-inactive transitions so that stale worker results are discarded.
+  uint64_t planning_generation_{0};
+  boost::synchronized_value<PlanningResult> pending_result_;
+  boost::synchronized_value<std::vector<CollisionEvent>> pending_collision_events_;
+
   LaneletRoute::ConstSharedPtr route_;
+  bool has_valid_route_{false};
   OccupancyGrid::ConstSharedPtr occupancy_grid_;
   Scenario::ConstSharedPtr scenario_;
   Odometry::ConstSharedPtr odom_;
@@ -257,6 +311,8 @@ private:
 
   // functions used in the constructor
   PlannerCommonParam getPlannerCommonParam();
+  AstarParam getAstarParam();
+  RRTStarParam getRRTStarParam();
 
   // functions, callback
   void onRoute(const LaneletRoute::ConstSharedPtr msg);
@@ -268,7 +324,15 @@ private:
     const bool result, const PlanningStatsCollector::MillisecondsF & duration_ms);
   void updateData();
   void reset();
-  void planTrajectory();
+  // Async planning helpers
+  void tryStartPlanning();
+  void runPlanningWorker(PlanningRequest request);
+  void consumePlanningResult();
+  void publishPendingCollisionEvents();
+  void joinPlanningThread();
+  // Returns a freshly constructed algorithm instance that can be used safely
+  // from any thread without sharing state with algo_ or other workers.
+  std::unique_ptr<AbstractPlanningAlgorithm> initializePlanningAlgorithmInstance();
   void initializePlanningAlgorithm();
   bool isDataReady();
 

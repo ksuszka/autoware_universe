@@ -26,10 +26,12 @@
 #include <geometry_msgs/msg/pose.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <limits>
 #include <memory>
 #include <optional>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -40,6 +42,71 @@ using autoware_planning_msgs::msg::TrajectoryPoint;
 using geometry_msgs::msg::Pose;
 using nav_msgs::msg::OccupancyGrid;
 using nav_msgs::msg::Odometry;
+
+namespace
+{
+struct FakePlanningAlgorithmState
+{
+  std::atomic<bool> block{false};
+  std::atomic<bool> release{false};
+  std::atomic<bool> started{false};
+  std::atomic<bool> last_reparking{false};
+  std::atomic<int> make_plan_calls{0};
+};
+
+class FakePlanningAlgorithm
+: public autoware::freespace_planning_algorithms::AbstractPlanningAlgorithm
+{
+public:
+  FakePlanningAlgorithm(
+    const autoware::freespace_planning_algorithms::PlannerCommonParam & planner_common_param,
+    const autoware::freespace_planning_algorithms::VehicleShape & vehicle_shape,
+    const rclcpp::Clock::SharedPtr & clock, std::shared_ptr<FakePlanningAlgorithmState> state)
+  : AbstractPlanningAlgorithm(planner_common_param, clock, vehicle_shape), state_(std::move(state))
+  {
+  }
+
+  bool makePlan(const Pose & start_pose, const Pose & goal_pose) override
+  {
+    state_->started = true;
+    ++state_->make_plan_calls;
+    while (state_->block && !state_->release) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    waypoints_.header.stamp = clock_->now();
+    waypoints_.header.frame_id = costmap_.header.frame_id;
+    waypoints_.waypoints.clear();
+
+    autoware::freespace_planning_algorithms::PlannerWaypoint start_waypoint;
+    start_waypoint.pose.header = waypoints_.header;
+    start_waypoint.pose.pose = start_pose;
+    start_waypoint.is_back = false;
+    waypoints_.waypoints.push_back(start_waypoint);
+
+    autoware::freespace_planning_algorithms::PlannerWaypoint goal_waypoint;
+    goal_waypoint.pose.header = waypoints_.header;
+    goal_waypoint.pose.pose = goal_pose;
+    goal_waypoint.is_back = false;
+    waypoints_.waypoints.push_back(goal_waypoint);
+
+    return true;
+  }
+
+  bool makePlan(const Pose & start_pose, const std::vector<Pose> & goal_candidates) override
+  {
+    if (goal_candidates.empty()) {
+      return false;
+    }
+    return makePlan(start_pose, goal_candidates.front());
+  }
+
+  void setReparking(const bool is_reparking) override { state_->last_reparking = is_reparking; }
+
+private:
+  std::shared_ptr<FakePlanningAlgorithmState> state_;
+};
+}  // namespace
 
 class TestFreespacePlanner : public ::testing::Test
 {
@@ -226,8 +293,163 @@ public:
     return received_status;
   }
 
+  void set_up_planning_context()
+  {
+    costmap_.header.frame_id = "map";
+    freespace_planner_->occupancy_grid_ = std::make_shared<OccupancyGrid>(costmap_);
+
+    freespace_planner_->current_pose_.header.frame_id = costmap_.header.frame_id;
+    freespace_planner_->current_pose_.header.stamp = freespace_planner_->get_clock()->now();
+    freespace_planner_->current_pose_.pose = trajectory_.points.front().pose;
+
+    freespace_planner_->goal_pose_.header.frame_id = costmap_.header.frame_id;
+    freespace_planner_->goal_pose_.header.stamp = freespace_planner_->get_clock()->now();
+    freespace_planner_->goal_pose_.pose = trajectory_.points.back().pose;
+
+    freespace_planner_->planning_generation_ = 0;
+  }
+
+  void use_fake_planning_algorithm(const std::shared_ptr<FakePlanningAlgorithmState> & state)
+  {
+    freespace_planner_->planning_algorithm_factory_ = [this, state]() {
+      return std::make_unique<FakePlanningAlgorithm>(
+        freespace_planner_->planner_common_param_, freespace_planner_->collision_vehicle_shape_,
+        freespace_planner_->get_clock(), state);
+    };
+  }
+
+  void wait_until_fake_planning_started(const std::shared_ptr<FakePlanningAlgorithmState> & state)
+  {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!state->started.load() && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    ASSERT_TRUE(state->started.load());
+  }
+
+  void test_async_planning_can_run_repeatedly_without_parameter_redeclaration()
+  {
+    set_up_planning_context();
+
+    EXPECT_NO_THROW(freespace_planner_->tryStartPlanning());
+    freespace_planner_->joinPlanningThread();
+    freespace_planner_->consumePlanningResult();
+    EXPECT_FALSE(freespace_planner_->is_planning_.load());
+    EXPECT_FALSE(freespace_planner_->planning_result_ready_.load());
+
+    EXPECT_NO_THROW(freespace_planner_->tryStartPlanning());
+    freespace_planner_->joinPlanningThread();
+    freespace_planner_->consumePlanningResult();
+    EXPECT_FALSE(freespace_planner_->is_planning_.load());
+    EXPECT_FALSE(freespace_planner_->planning_result_ready_.load());
+  }
+
+  void test_async_worker_propagates_reparking_snapshot()
+  {
+    set_up_planning_context();
+    const auto state = std::make_shared<FakePlanningAlgorithmState>();
+    state->block = true;
+    use_fake_planning_algorithm(state);
+
+    freespace_planner_->is_reparking_ = true;
+    freespace_planner_->tryStartPlanning();
+    wait_until_fake_planning_started(state);
+
+    EXPECT_TRUE(freespace_planner_->is_planning_.load());
+    EXPECT_FALSE(freespace_planner_->planning_result_ready_.load());
+    EXPECT_TRUE(state->last_reparking.load());
+
+    state->release = true;
+    freespace_planner_->joinPlanningThread();
+
+    EXPECT_FALSE(freespace_planner_->is_planning_.load());
+    EXPECT_TRUE(freespace_planner_->planning_result_ready_.load());
+    freespace_planner_->consumePlanningResult();
+    EXPECT_GE(freespace_planner_->trajectory_.points.size(), 2UL);
+    EXPECT_EQ(state->make_plan_calls.load(), 1);
+  }
+
+  void test_successful_plan_consumption_clears_reparking_mode()
+  {
+    set_up_planning_context();
+    const auto state = std::make_shared<FakePlanningAlgorithmState>();
+    use_fake_planning_algorithm(state);
+
+    freespace_planner_->is_reparking_ = true;
+    freespace_planner_->tryStartPlanning();
+    freespace_planner_->joinPlanningThread();
+    freespace_planner_->consumePlanningResult();
+
+    EXPECT_FALSE(freespace_planner_->is_reparking_);
+    EXPECT_GE(freespace_planner_->trajectory_.points.size(), 2UL);
+  }
+
+  void test_worker_reports_missing_costmap_as_failed_result()
+  {
+    set_up_planning_context();
+    freespace_planner_->is_planning_ = true;
+    freespace_planner_->planning_result_ready_ = false;
+
+    FreespacePlannerNode::PlanningRequest request;
+    // occupancy_grid left empty
+    request.current_pose = freespace_planner_->current_pose_;
+    request.goal_pose = freespace_planner_->goal_pose_;
+    request.is_reparking = false;
+    request.generation = freespace_planner_->planning_generation_;
+
+    freespace_planner_->runPlanningWorker(std::move(request));
+
+    EXPECT_FALSE(freespace_planner_->is_planning_.load());
+    EXPECT_TRUE(freespace_planner_->planning_result_ready_.load());
+    auto pending_result = freespace_planner_->pending_result_.synchronize();
+    EXPECT_FALSE(pending_result->success);
+    EXPECT_NE(pending_result->error_msg.find("occupancy grid"), std::string::npos);
+  }
+
+  void test_is_plan_required_with_empty_partial_trajectory_does_not_throw()
+  {
+    freespace_planner_->trajectory_ = trajectory_;
+    freespace_planner_->partial_trajectory_ = Trajectory();
+    freespace_planner_->reversing_indices_ = reversing_indices;
+    freespace_planner_->current_pose_.pose = trajectory_.points.front().pose;
+    freespace_planner_->occupancy_grid_ = std::make_shared<OccupancyGrid>(costmap_);
+
+    EXPECT_NO_THROW({
+      const bool required = freespace_planner_->isPlanRequired();
+      (void)required;
+    });
+  }
+
+  void test_stale_generation_result_is_discarded()
+  {
+    set_up_planning_context();
+    const auto state = std::make_shared<FakePlanningAlgorithmState>();
+    state->block = true;
+    use_fake_planning_algorithm(state);
+
+    freespace_planner_->tryStartPlanning();
+    wait_until_fake_planning_started(state);
+
+    // Simulate a route change while the worker is still running.
+    ++freespace_planner_->planning_generation_;
+
+    state->release = true;
+    freespace_planner_->joinPlanningThread();
+
+    // The worker wrote its result, but the generation is now stale.
+    EXPECT_TRUE(freespace_planner_->planning_result_ready_.load());
+
+    freespace_planner_->consumePlanningResult();
+
+    // Result should have been discarded — trajectory must remain empty.
+    EXPECT_TRUE(freespace_planner_->trajectory_.points.empty());
+  }
+
   void TearDown() override
   {
+    if (freespace_planner_) {
+      freespace_planner_->joinPlanningThread();
+    }
     freespace_planner_ = nullptr;
     trajectory_ = Trajectory();
     costmap_ = OccupancyGrid();
@@ -249,6 +471,11 @@ TEST_F(TestFreespacePlanner, testIsPlanRequired)
   EXPECT_TRUE(test_is_plan_required(false, true));
   // test with deviation from trajectory
   EXPECT_TRUE(test_is_plan_required(false, false, true));
+}
+
+TEST_F(TestFreespacePlanner, testIsPlanRequiredWithEmptyPartialTrajectoryDoesNotThrow)
+{
+  test_is_plan_required_with_empty_partial_trajectory_does_not_throw();
 }
 
 TEST_F(TestFreespacePlanner, testUpdateTargetIndex)
@@ -287,4 +514,29 @@ TEST_F(TestFreespacePlanner, testMissingScenarioDiagnosticStatusIsOk)
   ASSERT_TRUE(diagnostic_status.has_value());
   EXPECT_EQ(diagnostic_status->level, diagnostic_msgs::msg::DiagnosticStatus::OK);
   EXPECT_EQ(diagnostic_status->message, "Waiting for scenario");
+}
+
+TEST_F(TestFreespacePlanner, testAsyncPlanningCanRunRepeatedlyWithoutParameterRedeclaration)
+{
+  test_async_planning_can_run_repeatedly_without_parameter_redeclaration();
+}
+
+TEST_F(TestFreespacePlanner, testAsyncWorkerPropagatesReparkingSnapshot)
+{
+  test_async_worker_propagates_reparking_snapshot();
+}
+
+TEST_F(TestFreespacePlanner, testSuccessfulPlanConsumptionClearsReparkingMode)
+{
+  test_successful_plan_consumption_clears_reparking_mode();
+}
+
+TEST_F(TestFreespacePlanner, testWorkerReportsMissingCostmapAsFailedResult)
+{
+  test_worker_reports_missing_costmap_as_failed_result();
+}
+
+TEST_F(TestFreespacePlanner, testStaleGenerationResultIsDiscarded)
+{
+  test_stale_generation_result_is_discarded();
 }
