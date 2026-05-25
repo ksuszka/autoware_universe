@@ -352,11 +352,14 @@ void FreespacePlannerNode::updateTargetIndex()
       autoware_utils_geometry::calc_yaw_deviation(goal_pose_.pose, current_pose_.pose);
 
     RCLCPP_INFO_STREAM(
-      get_logger(), " Angle difference (goal pose vs current pose): " << yaw_error << " degrees");
-    RCLCPP_INFO_STREAM(
-      get_logger(), " Final deviation from goal - X: "
+      get_logger(), "Final destination reached. ΔYaw: "
+                      << yaw_error
+                      << " rad, "
+                         "ΔX: "
                       << current_pose_.pose.position.x - goal_pose_.pose.position.x
-                      << " Y: " << current_pose_.pose.position.y - goal_pose_.pose.position.y);
+                      << "m, "
+                         "ΔY: "
+                      << current_pose_.pose.position.y - goal_pose_.pose.position.y << "m");
     // activate reparking function
     if (std::fabs(yaw_error) >= node_param_.parking_accuracy_tolerance) {
       if (replan_count_ < node_param_.max_replan_count) {
@@ -365,8 +368,8 @@ void FreespacePlannerNode::updateTargetIndex()
         algo_->setReparking(true);
         reset();
         RCLCPP_INFO(
-          get_logger(), "Reparking enabled (replan count: %d) due to yaw error: %f", replan_count_,
-          yaw_error);
+          get_logger(), "Reparking enabled (replan count: %d) due to yaw error: %f rad",
+          replan_count_, yaw_error);
         return;
       } else {
         is_completed_ = true;
@@ -867,8 +870,7 @@ void FreespacePlannerNode::consumePlanningResult()
   }
 
   RCLCPP_DEBUG(
-    get_logger(), "Freespace planning: %f [s]",
-    std::chrono::duration<double>(duration_ms).count());
+    get_logger(), "Freespace planning: %f [s]", std::chrono::duration<double>(duration_ms).count());
 
   updatePlanningStats(result, duration_ms);
   publishPendingCollisionEvents();
@@ -888,8 +890,7 @@ void FreespacePlannerNode::consumePlanningResult()
       trajectory_.points.size(), reversing_indices_, prev_target_index_);
   } else {
     RCLCPP_WARN_THROTTLE(
-      get_logger(), *get_clock(), 30000, "Failed to find path: %s",
-      error_msg.c_str());
+      get_logger(), *get_clock(), 30000, "Failed to find path: %s", error_msg.c_str());
     diag_status_.onPlanResult(false);
     wall_manager_->onPlanFailed();
     reset();
