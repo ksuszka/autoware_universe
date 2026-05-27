@@ -38,6 +38,7 @@ public:
   SpeedDisplay();
   void drawSpeedDisplay(QPainter & painter, const QRectF & backgroundRect, const QColor & color);
   void updateSpeedData(const autoware_vehicle_msgs::msg::VelocityReport::ConstSharedPtr & msg);
+  void reset();
 
 private:
   float current_speed_;  // Internal variable to store current speed

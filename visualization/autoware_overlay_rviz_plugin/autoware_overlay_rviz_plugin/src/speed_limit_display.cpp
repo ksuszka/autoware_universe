@@ -69,6 +69,12 @@ void SpeedLimitDisplay::updateSpeedData(
   }
 }
 
+void SpeedLimitDisplay::reset()
+{
+  current_limit = 0.0f;
+  current_speed_ = 0.0f;
+}
+
 void SpeedLimitDisplay::drawSpeedLimitIndicator(
   QPainter & painter, const QRectF & backgroundRect, const QColor & color,
   const QColor & light_color, const QColor & dark_color, const QColor & bg_color,

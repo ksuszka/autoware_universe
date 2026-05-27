@@ -64,6 +64,11 @@ void SpeedDisplay::updateSpeedData(
   }
 }
 
+void SpeedDisplay::reset()
+{
+  current_speed_ = 0.0f;
+}
+
 // void SpeedDisplay::processMessage(const
 // autoware_vehicle_msgs::msg::VelocityReport::ConstSharedPtr msg)
 // {

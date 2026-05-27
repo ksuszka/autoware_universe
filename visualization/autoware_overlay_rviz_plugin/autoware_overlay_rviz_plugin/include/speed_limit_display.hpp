@@ -44,6 +44,7 @@ public:
   void updateSpeedLimitData(
     const autoware_internal_planning_msgs::msg::VelocityLimit::ConstSharedPtr msg);
   void updateSpeedData(const autoware_vehicle_msgs::msg::VelocityReport::ConstSharedPtr & msg);
+  void reset();
 
 private:
   float current_limit;   // Internal variable to store current gear

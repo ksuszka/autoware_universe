@@ -372,7 +372,28 @@ void SignalDisplay::drawVerticalRoundedRectangle(QPainter & painter, const QRect
 void SignalDisplay::reset()
 {
   rviz_common::Display::reset();
-  overlay_->hide();
+  {
+    std::lock_guard<std::mutex> lock(property_mutex_);
+    if (steering_wheel_display_) {
+      steering_wheel_display_->reset();
+    }
+    if (gear_display_) {
+      gear_display_->reset();
+    }
+    if (speed_display_) {
+      speed_display_->reset();
+    }
+    if (turn_signals_display_) {
+      turn_signals_display_->reset();
+    }
+    if (traffic_display_) {
+      traffic_display_->reset();
+    }
+    if (speed_limit_display_) {
+      speed_limit_display_->reset();
+    }
+  }
+  queueRender();
 }
 
 void SignalDisplay::updateOverlaySize()

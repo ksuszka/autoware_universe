@@ -39,6 +39,7 @@ public:
   void drawSteeringWheel(
     QPainter & painter, const QRectF & backgroundRect, float handle_angle_scale_);
   void updateSteeringData(const autoware_vehicle_msgs::msg::SteeringReport::ConstSharedPtr & msg);
+  void reset();
 
 private:
   float steering_angle_ = 0.0f;

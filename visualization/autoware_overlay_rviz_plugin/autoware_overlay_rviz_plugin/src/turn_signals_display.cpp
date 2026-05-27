@@ -74,6 +74,12 @@ void TurnSignalsDisplay::setBlinkingMode(std::string_view mode)
   blinking_mode_ = mode;
 }
 
+void TurnSignalsDisplay::reset()
+{
+  current_turn_signal_ = 0;
+  current_hazard_lights_ = 0;
+}
+
 void TurnSignalsDisplay::drawArrows(
   QPainter & painter, const QRectF & backgroundRect, const QColor & color)
 {

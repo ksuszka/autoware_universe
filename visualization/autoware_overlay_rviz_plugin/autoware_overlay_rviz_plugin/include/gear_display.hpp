@@ -40,6 +40,7 @@ public:
     QPainter & painter, const QRectF & backgroundRect, const QColor & color,
     const QColor & bg_color);
   void updateGearData(const autoware_vehicle_msgs::msg::GearReport::ConstSharedPtr & msg);
+  void reset();
 
 private:
   int current_gear_;  // Internal variable to store current gear

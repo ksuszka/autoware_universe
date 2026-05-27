@@ -40,6 +40,7 @@ public:
   void drawTrafficLightIndicator(QPainter & painter, const QRectF & backgroundRect);
   void updateTrafficLightData(
     const autoware_perception_msgs::msg::TrafficLightGroup::ConstSharedPtr & msg);
+  void reset();
   autoware_perception_msgs::msg::TrafficLightGroup current_traffic_;
 
 private:

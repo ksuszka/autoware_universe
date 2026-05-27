@@ -53,6 +53,11 @@ void TrafficDisplay::updateTrafficLightData(
   current_traffic_ = *msg;
 }
 
+void TrafficDisplay::reset()
+{
+  current_traffic_ = autoware_perception_msgs::msg::TrafficLightGroup();
+}
+
 void TrafficDisplay::drawTrafficLightIndicator(QPainter & painter, const QRectF & backgroundRect)
 {
   // Enable Antialiasing for smoother drawing

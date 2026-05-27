@@ -69,6 +69,12 @@ void SteeringWheelDisplay::updateSteeringData(
   }
 }
 
+void SteeringWheelDisplay::reset()
+{
+  steering_angle_ = 0.0f;
+  last_msg_ptr_.reset();
+}
+
 void SteeringWheelDisplay::drawSteeringWheel(
   QPainter & painter, const QRectF & backgroundRect, float handle_angle_scale_)
 {

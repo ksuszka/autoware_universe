@@ -55,6 +55,11 @@ void GearDisplay::updateGearData(const autoware_vehicle_msgs::msg::GearReport::C
   current_gear_ = msg->report;  // Assuming msg->report contains the gear information
 }
 
+void GearDisplay::reset()
+{
+  current_gear_ = 0;
+}
+
 void GearDisplay::drawGearIndicator(
   QPainter & painter, const QRectF & backgroundRect, const QColor & color, const QColor & bg_color)
 {

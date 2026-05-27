@@ -46,6 +46,7 @@ public:
   void updateHazardLightsData(
     const autoware_vehicle_msgs::msg::HazardLightsReport::ConstSharedPtr & msg);
   void setBlinkingMode(std::string_view mode);
+  void reset();
 
 private:
   QImage arrowImage;
