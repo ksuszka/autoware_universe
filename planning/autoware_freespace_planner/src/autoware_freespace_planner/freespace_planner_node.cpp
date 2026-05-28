@@ -494,6 +494,13 @@ bool FreespacePlannerNode::isDataReady()
   return is_ready;
 }
 
+Trajectory FreespacePlannerNode::createStopTrajectoryForCurrentState()
+{
+  return partial_trajectory_.points.empty()
+           ? utils::create_stop_trajectory(current_pose_, get_clock())
+           : utils::create_stop_trajectory(partial_trajectory_);
+}
+
 void FreespacePlannerNode::handleSessionTransition(const bool is_active_now)
 {
   const bool was_active = session_stats_.is_active;
@@ -627,9 +634,7 @@ void FreespacePlannerNode::onTimer()
       current_pose_.pose = odom_->pose.pose;
       current_pose_.header = odom_->header;
 
-      const auto stop_trajectory = partial_trajectory_.points.empty()
-                                     ? utils::create_stop_trajectory(current_pose_, get_clock())
-                                     : utils::create_stop_trajectory(partial_trajectory_);
+      const auto stop_trajectory = createStopTrajectoryForCurrentState();
       trajectory_pub_->publish(stop_trajectory);
     }
     return;
@@ -664,9 +669,7 @@ void FreespacePlannerNode::onTimer()
     // Stop before planning new trajectory, except in a new parking cycle as the vehicle already
     // stops.
     if (!is_new_parking_cycle_) {
-      const auto stop_trajectory = partial_trajectory_.points.empty()
-                                     ? utils::create_stop_trajectory(current_pose_, get_clock())
-                                     : utils::create_stop_trajectory(partial_trajectory_);
+      const auto stop_trajectory = createStopTrajectoryForCurrentState();
       trajectory_pub_->publish(stop_trajectory);
       debug_pose_array_pub_->publish(utils::trajectory_to_pose_array(stop_trajectory));
       debug_partial_pose_array_pub_->publish(utils::trajectory_to_pose_array(stop_trajectory));
@@ -697,25 +700,30 @@ void FreespacePlannerNode::onTimer()
   // Keep the virtual wall visible by re-publishing on every tick
   wall_manager_->republishIfActive();
 
-  // While planning is in progress (or no valid trajectory exists yet) keep publishing a stop
-  // trajectory so that the topic_monitor never times out and MRM is not triggered spuriously.
-  if (is_planning_ || trajectory_.points.size() <= 1) {
-    const auto stop_trajectory = partial_trajectory_.points.empty()
-                                   ? utils::create_stop_trajectory(current_pose_, get_clock())
-                                   : utils::create_stop_trajectory(partial_trajectory_);
-    trajectory_pub_->publish(stop_trajectory);
-    is_new_parking_cycle_ = false;
+  auto should_publish_stop = [this, &stop_watch]() -> bool {
+    if (is_planning_ || trajectory_.points.size() <= 1) {
+      const auto stop_trajectory = createStopTrajectoryForCurrentState();
+      trajectory_pub_->publish(stop_trajectory);
+      is_new_parking_cycle_ = false;
+      autoware_internal_debug_msgs::msg::Float64Stamped processing_time_msg;
+      processing_time_msg.stamp = get_clock()->now();
+      processing_time_msg.data = stop_watch.toc();
+      processing_time_pub_->publish(processing_time_msg);
+      return true;
+    }
+    return false;
+  };
 
-    // Publish ProcessingTime
-    autoware_internal_debug_msgs::msg::Float64Stamped processing_time_msg;
-    processing_time_msg.stamp = get_clock()->now();
-    processing_time_msg.data = stop_watch.toc();
-    processing_time_pub_->publish(processing_time_msg);
+  if (should_publish_stop()) {
     return;
   }
 
-  // Update partial trajectory
   updateTargetIndex();
+
+  if (should_publish_stop()) {
+    return;
+  }
+
   partial_trajectory_ =
     utils::get_partial_trajectory(trajectory_, prev_target_index_, target_index_, get_clock());
 

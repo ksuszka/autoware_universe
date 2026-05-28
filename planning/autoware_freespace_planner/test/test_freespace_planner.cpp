@@ -420,6 +420,33 @@ public:
     });
   }
 
+  void test_create_stop_trajectory_prefers_partial_after_reset_like_state()
+  {
+    freespace_planner_->trajectory_ = trajectory_;
+    freespace_planner_->partial_trajectory_ =
+      autoware::freespace_planner::utils::get_partial_trajectory(
+        trajectory_, 0, reversing_indices.front(),
+        std::make_shared<rclcpp::Clock>(RCL_SYSTEM_TIME));
+    ASSERT_FALSE(freespace_planner_->partial_trajectory_.points.empty());
+
+    // Simulate updateTargetIndex()->reset() in reparking path:
+    // full trajectory is cleared while a previous partial trajectory still exists.
+    freespace_planner_->trajectory_ = Trajectory();
+
+    freespace_planner_->current_pose_.pose.position.x = 123.0;
+    freespace_planner_->current_pose_.pose.position.y = 456.0;
+
+    const auto expected_first_pose = freespace_planner_->partial_trajectory_.points.front().pose;
+    const auto expected_size = freespace_planner_->partial_trajectory_.points.size();
+
+    Trajectory stop_trajectory;
+    EXPECT_NO_THROW(stop_trajectory = freespace_planner_->createStopTrajectoryForCurrentState());
+    EXPECT_EQ(stop_trajectory.points.size(), expected_size);
+    ASSERT_FALSE(stop_trajectory.points.empty());
+    EXPECT_DOUBLE_EQ(stop_trajectory.points.front().pose.position.x, expected_first_pose.position.x);
+    EXPECT_DOUBLE_EQ(stop_trajectory.points.front().pose.position.y, expected_first_pose.position.y);
+  }
+
   void test_stale_generation_result_is_discarded()
   {
     set_up_planning_context();
@@ -476,6 +503,11 @@ TEST_F(TestFreespacePlanner, testIsPlanRequired)
 TEST_F(TestFreespacePlanner, testIsPlanRequiredWithEmptyPartialTrajectoryDoesNotThrow)
 {
   test_is_plan_required_with_empty_partial_trajectory_does_not_throw();
+}
+
+TEST_F(TestFreespacePlanner, testCreateStopTrajectoryPrefersPartialAfterResetLikeState)
+{
+  test_create_stop_trajectory_prefers_partial_after_reset_like_state();
 }
 
 TEST_F(TestFreespacePlanner, testUpdateTargetIndex)

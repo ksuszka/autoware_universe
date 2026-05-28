@@ -335,6 +335,7 @@ private:
   std::unique_ptr<AbstractPlanningAlgorithm> initializePlanningAlgorithmInstance();
   void initializePlanningAlgorithm();
   bool isDataReady();
+  Trajectory createStopTrajectoryForCurrentState();
 
   /**
    * @brief Checks if a new trajectory planning is required.

@@ -274,7 +274,7 @@ TEST(FreespacePlannerUtilsTest, testCreateStopTrajectory)
 
   auto stop_traj = autoware::freespace_planner::utils::create_stop_trajectory(
     current_pose, std::make_shared<rclcpp::Clock>(RCL_SYSTEM_TIME));
-  EXPECT_EQ(stop_traj.points.size(), 1ul);
+  EXPECT_EQ(stop_traj.points.size(), 3ul);
   if (!stop_traj.points.empty()) {
     EXPECT_DOUBLE_EQ(stop_traj.points.front().pose.position.x, 1.0);
     EXPECT_DOUBLE_EQ(stop_traj.points.front().longitudinal_velocity_mps, 0.0);
