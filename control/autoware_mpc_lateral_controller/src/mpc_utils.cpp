@@ -134,6 +134,10 @@ std::tuple<bool, MPCTrajectory, size_t> resampleMPCTrajectoryByDistance(
     output_arclength.push_back(s);
   }
 
+  if (output_arclength.size() < 3) {
+    return {false, output, 0};
+  }
+
   std::vector<double> input_yaw = input.yaw;
   convertEulerAngleToMonotonic(input_yaw);
 

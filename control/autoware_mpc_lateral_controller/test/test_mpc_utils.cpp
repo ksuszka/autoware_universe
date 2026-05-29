@@ -115,6 +115,26 @@ TEST(TestMPC, resampleMPCTrajectoryByDistance_empty_input)
 }
 
 /* cppcheck-suppress syntaxError */
+TEST(TestMPC, resampleMPCTrajectoryByDistance_too_short_after_resampling)
+{
+  MPCTrajectory input;
+  input.push_back(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+  input.push_back(0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+  input.push_back(0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+
+  const double resample_interval_dist = 1.0;
+  const size_t nearest_seg_idx = 1;
+  const double ego_offset_to_segment = 0.0;
+
+  auto [success, output, base_link_segment_idx] = MPCUtils::resampleMPCTrajectoryByDistance(
+    input, resample_interval_dist, nearest_seg_idx, ego_offset_to_segment);
+
+  ASSERT_FALSE(success) << "resampling should fail when the output trajectory has fewer than 3 points";
+  ASSERT_TRUE(output.empty()) << "output should stay empty when resampling result is too short";
+  EXPECT_EQ(base_link_segment_idx, 0);
+}
+
+/* cppcheck-suppress syntaxError */
 TEST(TestMPC, dynamicSmoothingVelocity)
 {
   auto mpc_trajectory_from_vec = [](const std::vector<double> & vx_vec) {
@@ -209,6 +229,22 @@ TEST(TestMPC, calcNearestPoseInterp)
   ASSERT_NEAR(autoware_utils::get_rpy(nearest_pose.orientation).z, 0.11, 1e-6)
     << "interpolated yaw should be close to current pose";
   ASSERT_NEAR(nearest_time, 41.1, 1e-6) << "interpolated time should be close to current pose";
+}
+
+/* cppcheck-suppress syntaxError */
+TEST(TestMPC, calcTrajectoryCurvature_duplicate_points)
+{
+  MPCTrajectory trajectory;
+  trajectory.push_back(1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+  trajectory.push_back(1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+  trajectory.push_back(1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);
+
+  const auto curvature = MPCUtils::calcTrajectoryCurvature(1, trajectory);
+
+  ASSERT_EQ(curvature.size(), trajectory.size());
+  for (const auto value : curvature) {
+    EXPECT_DOUBLE_EQ(value, 0.0);
+  }
 }
 
 }  // namespace

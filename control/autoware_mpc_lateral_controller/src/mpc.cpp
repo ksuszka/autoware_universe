@@ -228,7 +228,9 @@ void MPC::setReferenceTrajectory(
     MPCUtils::resampleMPCTrajectoryByDistance(
       mpc_traj_raw, param.traj_resample_dist, nearest_seg_idx, ego_offset_to_segment);
   if (!success_resample) {
-    warn_throttle("[setReferenceTrajectory] spline error when resampling by distance");
+    warn_throttle(
+      "[setReferenceTrajectory] failed to resample trajectory by distance or resampled "
+      "trajectory is too short");
     return;
   }
 
