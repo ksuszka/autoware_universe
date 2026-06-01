@@ -21,6 +21,7 @@
 
 #include <autoware_perception_msgs/msg/detail/object_classification__struct.hpp>
 
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -74,6 +75,8 @@ AvoidanceParameters getParameter(rclcpp::Node * node)
         *node, ns + "lateral_margin.hard_margin_for_parked_vehicle");
       param.longitudinal_margin =
         get_or_declare_parameter<double>(*node, ns + "longitudinal_margin");
+      param.longitudinal_window_margin =
+        get_or_declare_parameter<double>(*node, ns + "longitudinal_window_margin");
       param.th_error_eclipse_long_radius =
         get_or_declare_parameter<double>(*node, ns + "th_error_eclipse_long_radius");
       return param;
@@ -90,6 +93,16 @@ AvoidanceParameters getParameter(rclcpp::Node * node)
       ObjectClassification::PEDESTRIAN, get_object_param(ns + "pedestrian."));
     p.object_parameters.emplace(ObjectClassification::BICYCLE, get_object_param(ns + "bicycle."));
     p.object_parameters.emplace(ObjectClassification::UNKNOWN, get_object_param(ns + "unknown."));
+
+    // Pre-compute near_bound_clip_compensation from object margins.
+    p.near_bound_clip_compensation = std::numeric_limits<double>::max();
+    for (const auto & [type, param] : p.object_parameters) {
+      p.near_bound_clip_compensation =
+        std::min(p.near_bound_clip_compensation, param.lateral_hard_margin);
+      p.near_bound_clip_compensation =
+        std::min(p.near_bound_clip_compensation, param.lateral_hard_margin_for_parked_vehicle);
+    }
+    p.near_bound_clip_compensation = std::max(p.near_bound_clip_compensation, 0.0);
 
     p.lower_distance_for_polygon_expansion =
       get_or_declare_parameter<double>(*node, ns + "lower_distance_for_polygon_expansion");

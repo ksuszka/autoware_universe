@@ -164,6 +164,122 @@ void pushUniqueVector(T & base_vector, const T & additional_vector)
 
 }  // namespace
 
+/// @brief Pure geometry corridor measurement between an obstacle's overhang face and the
+///        drivable area bounds.
+///
+///        Algorithm: (1) vertex sampling in longitudinal window, (2) ray-cast fallback
+static double measureCorridor(
+  ObjectData & object,
+  const Pose & face_pose,
+  const Point & face_pt,
+  const bool on_right,
+  const std::vector<Point> & far_bound,
+  const std::vector<Point> & near_bound,
+  const double near_bound_clip_compensation,
+  const Point & window_center,
+  const double half_window)
+{
+  object.narrowest_place = std::nullopt;
+
+  // Ray cast reach distances (metres) for the perpendicular fallback.
+  static constexpr double kRayReachInward = 5.0;
+  static constexpr double kRayReachOutward = 10.0;
+
+  const double yaw = tf2::getYaw(face_pose.orientation);
+  const double cos_yaw = std::cos(yaw);
+  const double sin_yaw = std::sin(yaw);
+
+  // Longitudinal offset from window center in the pose frame.
+  const auto calc_longitudinal_offset = [&](const Point & pt) noexcept -> double {
+    return cos_yaw * (pt.x - window_center.x) + sin_yaw * (pt.y - window_center.y);
+  };
+
+  // Signed lateral offset from face_pt in the pose frame
+  const auto calc_lateral_offset = [&](const Point & pt) noexcept -> double {
+    const double lat =
+      cos_yaw * (pt.y - face_pt.y) - sin_yaw * (pt.x - face_pt.x);  // cross product z
+    return on_right ? lat : -lat;
+  };
+
+  // Check if point is inside the longitudinal window AND within reach of face_pt.
+  // The Euclidean distance check prevents picking up bound points from the opposite
+  // side of tight curves (roundabouts).
+  const double max_reach_sq =
+    (half_window + kRayReachOutward) * (half_window + kRayReachOutward);
+  const auto in_window = [&](const Point & pt) noexcept -> bool {
+    const double longitudinal_offset = calc_longitudinal_offset(pt);
+    if (longitudinal_offset < -half_window || longitudinal_offset > half_window) return false;
+    const double dx = pt.x - face_pt.x;
+    const double dy = pt.y - face_pt.y;
+    return (dx * dx + dy * dy) <= max_reach_sq;
+  };
+
+  // Perpendicular ray-cast fallback when vertex sampling finds no candidates.
+  const auto cast_ray = [&](const std::vector<Point> & bound) -> std::optional<Point> {
+    const auto ray_inward =
+      calc_offset_pose(face_pose, 0.0, on_right ? -kRayReachInward : kRayReachInward, 0.0)
+        .position;
+    const auto ray_outward =
+      calc_offset_pose(face_pose, 0.0, on_right ? kRayReachOutward : -kRayReachOutward, 0.0)
+        .position;
+    std::optional<Point> closest_hit;
+    for (size_t i = 0; i + 1 < bound.size(); ++i) {
+      const auto candidate = autoware_utils::intersect(ray_inward, ray_outward, bound[i], bound[i + 1]);
+      if (!candidate) continue;
+      const bool is_closer_than_current_hit =
+        !closest_hit || autoware_utils::calc_squared_distance2d(face_pt, *candidate) <
+                          autoware_utils::calc_squared_distance2d(face_pt, *closest_hit);
+      if (is_closer_than_current_hit) closest_hit = candidate;
+    }
+    return closest_hit;
+  };
+
+  // Measure far bound — find the inward-most (minimum lateral offset) bound point.
+  double far_lateral_distance = std::numeric_limits<double>::infinity();
+  Point far_point{};
+  for (const auto & pt : far_bound) {
+    if (!in_window(pt)) continue;
+    const double lateral_offset = calc_lateral_offset(pt);
+    if (lateral_offset < far_lateral_distance) {
+      far_lateral_distance = lateral_offset;
+      far_point = pt;
+    }
+  }
+  if (!std::isfinite(far_lateral_distance)) {
+    if (const auto hit = cast_ray(far_bound)) {
+      far_lateral_distance = calc_lateral_offset(*hit);
+      far_point = *hit;
+    }
+  }
+
+  // Measure near bound — find the outward-most (maximum lateral offset) bound point.
+  double near_lateral_distance = -std::numeric_limits<double>::infinity();
+  for (const auto & pt : near_bound) {
+    if (!in_window(pt)) continue;
+    const double lateral_offset = calc_lateral_offset(pt);
+    if (lateral_offset > near_lateral_distance) {
+      near_lateral_distance = lateral_offset;
+    }
+  }
+  if (!std::isfinite(near_lateral_distance)) {
+    if (const auto hit = cast_ray(near_bound)) {
+      near_lateral_distance = calc_lateral_offset(*hit);
+    }
+  }
+
+  // Compute corridor width.
+  if (!std::isfinite(far_lateral_distance)) {
+    return 0.0;
+  }
+
+  const double intrusion = std::max(0.0, near_lateral_distance - near_bound_clip_compensation);
+  const double corridor = far_lateral_distance - intrusion;
+  const double result = corridor > 1e-3 ? corridor : 0.0;
+
+  object.narrowest_place = std::make_pair(face_pt, far_point);
+  return result;
+}
+
 namespace filtering_utils
 {
 /**
@@ -1115,25 +1231,25 @@ std::optional<double> getAvoidMargin(
 }
 
 /**
- * @brief get avoidance lateral margin based on road width.
- * @param object data.
- * @param avoidance module data, which includes current reference path.
- * @param planner data, which includes ego vehicle footprint info.
- * @param parameters for margin calculation.
- * @return if this function finds there is no enough space to avoid, return nullopt.
+ * @brief measure the lateral corridor width between an obstacle's overhang face and the
+ *        far drivable-area bound, accounting for near-bound intrusion.
+ * @param object data
+ * @param avoidance module data, which includes current reference path and drivable bounds.
+ * @param planner data, which includes route handler.
+ * @param parameters for window / compensation margins.
+ * @return corridor width in metres (0.0 if measurement fails).
  */
 double getRoadShoulderDistance(
   ObjectData & object, const AvoidancePlanningData & data,
   const std::shared_ptr<const PlannerData> & planner_data,
   const std::shared_ptr<AvoidanceParameters> & parameters)
 {
-
   const auto object_closest_index =
     autoware::motion_utils::findNearestIndex(data.reference_path.points, object.getPosition());
   const auto & object_closest_pose =
     data.reference_path.points.at(object_closest_index).point.pose;
 
-  const auto rh = planner_data->route_handler;
+  const auto & rh = planner_data->route_handler;
   if (!rh->getClosestLaneletWithinRoute(object_closest_pose, &object.overhang_lanelet)) {
     return 0.0;
   }
@@ -1143,110 +1259,48 @@ double getRoadShoulderDistance(
   }
 
   const bool on_right = isOnRight(object);
-  const auto centerline_pose =
-  lanelet::utils::getClosestCenterPose(object.overhang_lanelet, object.getPosition());
-  const auto & bound = on_right ? data.left_bound : data.right_bound;
-  if (bound.empty()) {
+  const auto & far_bound = on_right ? data.left_bound : data.right_bound;
+  const auto & near_bound = on_right ? data.right_bound : data.left_bound;
+  if (far_bound.empty() || near_bound.empty()) {
     return 0.0;
   }
+
   const Point & face_pt = object.overhang_points.front().second;
   const Pose face_pose = geometry_msgs::build<Pose>()
     .position(face_pt)
-    .orientation(centerline_pose.orientation);
+    .orientation(object_closest_pose.orientation);
+  const auto object_type = utils::getHighestProbLabel(object.object.classification);
+  const auto & object_parameter = parameters->object_parameters.at(object_type);
 
-  struct {
-    double dist = std::numeric_limits<double>::infinity();
-    Point src{};
-    Point dst{};
-
-    void try_update(const double dist, const Point & src, const Point & dst)
-    {
-      if (dist >= this->dist) return;
-      this->dist = dist;
-      this->src = src;
-      this->dst = dst;
-    }
-  } min_gap;
-
-  // (1) Bound-vertex lateral sampling along the object's longitudinal footprint.
-  //
-  // For every bound vertex that falls (longitudinally) within the envelope arc range,
-  // measure the lateral gap from most laterally shifted point of an objact (face_pt) to that vertex.
-  // This catches indentations anywhere along the object's length — e.g. a bus-clipped bound that locally narrows
-  // the drivable area, even if the indent doesn't line up with face_pt.
-  {
-    const auto object_type = utils::getHighestProbLabel(object.object.classification);
-    const auto object_parameter = parameters->object_parameters.at(object_type);
-    const auto lateral_hard_margin = object.is_parked
-      ? object_parameter.lateral_hard_margin_for_parked_vehicle
-      : object_parameter.lateral_hard_margin;
-    const double k_arc_margin =
-      lateral_hard_margin + object_parameter.envelope_buffer_margin;
-
-    // Compute envelope arc range once.
-    double env_arc_min = std::numeric_limits<double>::max();
-    double env_arc_max = std::numeric_limits<double>::lowest();
-    for (const auto & p : object.envelope_poly.outer()) {
-      const auto pt = autoware_utils::create_point(p.x(), p.y(), 0.0);
-      const auto pt_idx =
-        autoware::motion_utils::findNearestIndex(data.reference_path.points, pt);
-      const auto arc = autoware::motion_utils::calcSignedArcLength(
-        data.reference_path.points, object_closest_index, pt_idx);
-      env_arc_min = std::min(env_arc_min, arc);
-      env_arc_max = std::max(env_arc_max, arc);
-    }
-
-    // Iterate over bound vertices and find the minimum lateral distance within the arc window.
-    for (size_t i = 0; i < bound.size(); ++i) {
-      const auto bp_idx =
-        autoware::motion_utils::findNearestIndex(data.reference_path.points, bound[i]);
-      const auto arc_rel = autoware::motion_utils::calcSignedArcLength(
-        data.reference_path.points, object_closest_index, bp_idx);
-
-      if (arc_rel < env_arc_min - k_arc_margin || arc_rel > env_arc_max + k_arc_margin) {
-        continue;
-      }
-
-      const double lat  = calc_lateral_deviation(face_pose, bound[i]);
-      const double dist = on_right ? lat : -lat;
-      if (std::abs(dist) > 1e-3) {
-        min_gap.try_update(dist, face_pt, bound[i]);
-      }
-    }
+  // Longitudinal extent from overhang_points (envelope polygon vertices).
+  const double yaw = tf2::getYaw(object_closest_pose.orientation);
+  const double cos_yaw = std::cos(yaw);
+  const double sin_yaw = std::sin(yaw);
+  double lon_min = std::numeric_limits<double>::max();
+  double lon_max = std::numeric_limits<double>::lowest();
+  for (const auto & [dist, pt] : object.overhang_points) {
+    const double lon = cos_yaw * pt.x + sin_yaw * pt.y;
+    lon_min = std::min(lon_min, lon);
+    lon_max = std::max(lon_max, lon);
   }
 
-  // (2) Perpendicular ray from face_pt through all bound segments.
-  //
-  // A single spanning ray always finds the boundary at the face point's position,
-  // regardless of how sparse or clipped the bound is.
-  // This is the fallback that guarantees a result even when (1) finds zero vertices
-  // inside the arc window.
-  {
-    constexpr double in_ray_reach = 5.0;
-    constexpr double out_ray_reach = 10.0;
+  // Window center at the longitudinal midpoint, same lateral as face_pt.
+  const double lon_center = 0.5 * (lon_max + lon_min);
+  const double lat_face = -sin_yaw * face_pt.x + cos_yaw * face_pt.y;
+  Point overhang_center{};
+  overhang_center.x = cos_yaw * lon_center - sin_yaw * lat_face;
+  overhang_center.y = sin_yaw * lon_center + cos_yaw * lat_face;
+  overhang_center.z = face_pt.z;
 
-    const auto ray_inward =
-      calc_offset_pose(face_pose, 0.0, on_right ? -in_ray_reach : in_ray_reach, 0.0).position;
-    const auto ray_outward =
-      calc_offset_pose(face_pose, 0.0, on_right ? out_ray_reach : -out_ray_reach, 0.0).position;
+  const double overhang_half_length = 0.5 * (lon_max - lon_min);
+  const double half_window =
+    overhang_half_length + object_parameter.longitudinal_window_margin;
 
-    for (size_t i = 1; i < bound.size(); ++i) {
-      if (const auto hit = autoware_utils::intersect(ray_inward, ray_outward, bound[i - 1], bound[i])) {
-        const bool hit_is_left = calc_lateral_deviation(face_pose, *hit) > 0.0;
-        const double signed_dist =
-          calc_distance2d(face_pt, *hit) * ((hit_is_left == on_right) ? 1.0 : -1.0);
-        min_gap.try_update(signed_dist, face_pt, *hit);
-      }
-    }
-  }
-
-  if (std::isinf(min_gap.dist)) {
-    return 0.0;
-  }
-
-  // Store the narrowest gap endpoints for debug visualisation.
-  object.narrowest_place = std::make_pair(min_gap.src, min_gap.dst);
-  return min_gap.dist;
+  return measureCorridor(
+    object, face_pose, face_pt, on_right,
+    far_bound, near_bound,
+    parameters->near_bound_clip_compensation,
+    overhang_center, half_window);
 }
 }  // namespace filtering_utils
 
@@ -2220,7 +2274,8 @@ void updateRoadShoulderDistance(
                                        ? object_parameter.lateral_hard_margin_for_parked_vehicle
                                        : object_parameter.lateral_hard_margin;
 
-    o.avoid_margin = lateral_hard_margin + 0.5 * vehicle_width;
+    o.avoid_margin =
+      lateral_hard_margin + object_parameter.envelope_buffer_margin + 0.5 * vehicle_width;
   }
   const auto extract_obstacles = generateObstaclePolygonsForDrivableArea(
     clip_objects, parameters, planner_data->parameters.vehicle_width);

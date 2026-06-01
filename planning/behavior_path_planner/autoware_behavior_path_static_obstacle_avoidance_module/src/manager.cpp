@@ -20,6 +20,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -61,6 +62,8 @@ void StaticObstacleAvoidanceModuleManager::updateModuleParams(
       config.lateral_hard_margin_for_parked_vehicle);
     update_param<double>(parameters, ns + "longitudinal_margin", config.longitudinal_margin);
     update_param<double>(
+      parameters, ns + "longitudinal_window_margin", config.longitudinal_window_margin);
+    update_param<double>(
       parameters, ns + "th_error_eclipse_long_radius", config.th_error_eclipse_long_radius);
   };
 
@@ -78,6 +81,16 @@ void StaticObstacleAvoidanceModuleManager::updateModuleParams(
     update_param<double>(
       parameters, ns + "lower_distance_for_polygon_expansion",
       p->lower_distance_for_polygon_expansion);
+
+    // Recompute near_bound_clip_compensation after margin updates.
+    p->near_bound_clip_compensation = std::numeric_limits<double>::max();
+    for (const auto & [type, param] : p->object_parameters) {
+      p->near_bound_clip_compensation =
+        std::min(p->near_bound_clip_compensation, param.lateral_hard_margin);
+      p->near_bound_clip_compensation =
+        std::min(p->near_bound_clip_compensation, param.lateral_hard_margin_for_parked_vehicle);
+    }
+    p->near_bound_clip_compensation = std::max(p->near_bound_clip_compensation, 0.0);
     update_param<double>(
       parameters, ns + "upper_distance_for_polygon_expansion",
       p->upper_distance_for_polygon_expansion);

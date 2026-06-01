@@ -111,6 +111,8 @@ struct ObjectParameter
 
   double longitudinal_margin{0.0};
 
+  double longitudinal_window_margin{0.5};
+
   double th_error_eclipse_long_radius{0.0};
 };
 
@@ -374,6 +376,10 @@ struct AvoidanceParameters
 
   // parameters depend on object class
   std::unordered_map<uint8_t, ObjectParameter> object_parameters;
+
+  // Pre-computed minimum lateral_hard_margin across all object types.
+  // Used as near-bound clip compensation in corridor measurement.
+  double near_bound_clip_compensation{0.0};
 
   // ego predicted path params.
   utils::path_safety_checker::EgoPredictedPathParams ego_predicted_path_params{};
