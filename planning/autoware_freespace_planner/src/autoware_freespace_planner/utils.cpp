@@ -153,8 +153,8 @@ Trajectory create_stop_trajectory(
 
   const auto yaw = tf2::getYaw(current_pose.pose.orientation);
 
-  // Generate 3 points along the forward direction with small spacing
-  constexpr double point_interval = 0.1;  // 0.1 m spacing between points
+  // Generate 3 points along the forward direction with spacing
+  constexpr double point_interval = 0.2;  // [m] spacing between points
   for (size_t i = 0; i < 3; ++i) {
     TrajectoryPoint point;
     point.pose = current_pose.pose;
